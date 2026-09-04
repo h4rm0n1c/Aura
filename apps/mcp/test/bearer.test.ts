@@ -9,6 +9,7 @@ test("MCP bearer adapter authenticates one credential and hides rejection detail
   const record = {
     credentialId: created.credentialId,
     agentId: "agent-9",
+    agentStatus: "active" as const,
     verifier: created.verifier,
     capabilities: ["read"],
     status: "active" as const,
@@ -32,6 +33,13 @@ test("MCP bearer adapter authenticates one credential and hides rejection detail
     await authenticateMcpAuthorization(`Bearer ${created.token}`, async () => ({
       ...record,
       status: "revoked" as const,
+    })),
+    { ok: false, reason: "authentication_failed" },
+  );
+  assert.deepEqual(
+    await authenticateMcpAuthorization(`Bearer ${created.token}`, async () => ({
+      ...record,
+      agentStatus: "disabled" as const,
     })),
     { ok: false, reason: "authentication_failed" },
   );

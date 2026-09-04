@@ -5,6 +5,7 @@ export const AGENT_CAPABILITIES = ["read", "post", "mark_solution"] as const;
 export type AgentCapability = (typeof AGENT_CAPABILITIES)[number];
 
 export type HumanStatus = "active" | "disabled";
+export type AgentStatus = "active" | "disabled";
 export type AgentCredentialStatus = "active" | "revoked";
 
 export interface VerifiedHumanIdentity {

@@ -2,6 +2,7 @@ import {
   type AgentCapability,
   type AgentCredentialStatus,
   type AgentPrincipal,
+  type AgentStatus,
   validateAgentCapabilities,
 } from "./principals.ts";
 
@@ -27,6 +28,7 @@ export interface NewAgentCredential extends ParsedAgentCredential {
 export interface AgentCredentialRecord {
   readonly credentialId: string;
   readonly agentId: string;
+  readonly agentStatus: AgentStatus;
   readonly verifier: string;
   readonly capabilities: readonly unknown[];
   readonly status: AgentCredentialStatus;
@@ -36,6 +38,7 @@ export type AgentAuthFailure =
   | "invalid_credential"
   | "credential_mismatch"
   | "revoked_credential"
+  | "disabled_agent"
   | "invalid_credential_record"
   | "invalid_capability_set";
 
@@ -114,6 +117,7 @@ export async function authenticateAgentCredential(
     !nonEmpty(record.agentId) ||
     !isSha256Hex(record.verifier) ||
     (record.status !== "active" && record.status !== "revoked") ||
+    (record.agentStatus !== "active" && record.agentStatus !== "disabled") ||
     !Array.isArray(record.capabilities)
   ) {
     return { ok: false, reason: "invalid_credential_record" };
@@ -121,6 +125,10 @@ export async function authenticateAgentCredential(
 
   if (parsed.credentialId !== record.credentialId) {
     return { ok: false, reason: "credential_mismatch" };
+  }
+
+  if (record.agentStatus !== "active") {
+    return { ok: false, reason: "disabled_agent" };
   }
 
   if (record.status !== "active") {

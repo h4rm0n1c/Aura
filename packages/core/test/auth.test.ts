@@ -35,25 +35,21 @@ test("human authentication takes role from Aura record, not identity text", () =
   const result = authenticateHuman(humanIdentity, humanRecord);
   assert.equal(result.ok, true);
   if (!result.ok) return;
-
   assert.equal(result.principal.role, "member");
   assert.equal(result.principal.email, "human@example.test");
   assert.equal(principalKey(result.principal), "human:human-1");
 });
 
 test("human authentication fails closed on identity mismatch and disable", () => {
-  assert.deepEqual(
-    authenticateHuman({ ...humanIdentity, providerId: "attacker" }, humanRecord),
-    { ok: false, reason: "identity_mismatch" },
-  );
+  assert.deepEqual(authenticateHuman({ ...humanIdentity, providerId: "attacker" }, humanRecord), {
+    ok: false,
+    reason: "identity_mismatch",
+  });
   assert.deepEqual(authenticateHuman(humanIdentity, { ...humanRecord, status: "disabled" }), {
     ok: false,
     reason: "disabled_human",
   });
-  assert.deepEqual(authenticateHuman(humanIdentity, null), {
-    ok: false,
-    reason: "unknown_human",
-  });
+  assert.deepEqual(authenticateHuman(humanIdentity, null), { ok: false, reason: "unknown_human" });
 });
 
 test("human role hierarchy is explicit", () => {
@@ -61,7 +57,6 @@ test("human role hierarchy is explicit", () => {
   const admin = authenticateHuman(humanIdentity, { ...humanRecord, role: "admin" });
   assert(member.ok && admin.ok);
   if (!member.ok || !admin.ok) return;
-
   assert.equal(humanHasRole(member.principal, "member"), true);
   assert.equal(humanHasRole(member.principal, "moderator"), false);
   assert.equal(humanHasRole(admin.principal, "moderator"), true);
@@ -72,13 +67,10 @@ test("agent credentials are structured, high entropy, and verifier-only", async 
   let counter = 0;
   const deterministic = (length: number): Uint8Array => {
     const bytes = new Uint8Array(length);
-    for (let index = 0; index < length; index += 1) {
-      bytes[index] = (counter + index) & 0xff;
-    }
+    for (let index = 0; index < length; index += 1) bytes[index] = (counter + index) & 0xff;
     counter += length;
     return bytes;
   };
-
   const created = await createAgentCredential(deterministic);
   const parsed = parseAgentCredential(created.token);
   assert(parsed !== null);
@@ -92,16 +84,16 @@ test("agent credentials are structured, high entropy, and verifier-only", async 
   assert.equal(parseBearerAuthorization(`Bearer  ${created.token}`), null);
 });
 
-test("agent authentication rejects wrong, revoked, and overpowered records", async () => {
+test("agent authentication rejects wrong, revoked, disabled, and overpowered records", async () => {
   const created = await createAgentCredential((length) => new Uint8Array(length).fill(7));
   const validRecord = {
     credentialId: created.credentialId,
     agentId: "agent-1",
+    agentStatus: "active" as const,
     verifier: created.verifier,
     capabilities: ["read", "post"],
     status: "active" as const,
   };
-
   const valid = await authenticateAgentCredential(created.token, validRecord);
   assert.equal(valid.ok, true);
   if (!valid.ok) return;
@@ -114,17 +106,16 @@ test("agent authentication rejects wrong, revoked, and overpowered records", asy
     ok: false,
     reason: "credential_mismatch",
   });
-
-  assert.deepEqual(
-    await authenticateAgentCredential(created.token, { ...validRecord, status: "revoked" }),
-    { ok: false, reason: "revoked_credential" },
-  );
-
-  assert.deepEqual(
-    await authenticateAgentCredential(created.token, {
-      ...validRecord,
-      capabilities: ["read", "admin"],
-    }),
-    { ok: false, reason: "invalid_capability_set" },
-  );
+  assert.deepEqual(await authenticateAgentCredential(created.token, { ...validRecord, status: "revoked" }), {
+    ok: false,
+    reason: "revoked_credential",
+  });
+  assert.deepEqual(await authenticateAgentCredential(created.token, { ...validRecord, agentStatus: "disabled" }), {
+    ok: false,
+    reason: "disabled_agent",
+  });
+  assert.deepEqual(await authenticateAgentCredential(created.token, { ...validRecord, capabilities: ["read", "admin"] }), {
+    ok: false,
+    reason: "invalid_capability_set",
+  });
 });
