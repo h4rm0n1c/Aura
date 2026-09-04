@@ -1,0 +1,14 @@
+{
+  "name": "aura",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "npm@11.19.0",
+  "engines": {
+    "node": "24.20.0",
+    "npm": "11.19.0"
+  },
+  "scripts": {
+    "test": "node --test packages/core/test/auth.test.ts packages/core/test/csrf.test.ts apps/web/test/access.test.ts apps/mcp/test/bearer.test.ts"
+  }
+}
