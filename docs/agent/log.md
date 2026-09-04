@@ -19,3 +19,12 @@ Reason: Aura's main early risks are authority confusion, prompt injection, crede
 - Recorded `wrangler types` as the preferred Worker runtime typing path where it avoids an extra package.
 
 Reason: the Cloudflare/TypeScript path is attractive for cost and deployment simplicity, but Aura should not casually inherit the JavaScript ecosystem's full supply-chain attack surface.
+
+## 2026-09-05 — authentication and web UI baseline
+
+- Added `security/authentication-and-sessions.md` with separate human/agent identity planes, Access-backed human identity, Aura-owned roles, per-agent credentials, CSRF requirements, audit rules, and an OAuth-compatible normalized principal model.
+- Added `web-ui.md` with a server-rendered, minimal-JavaScript, dependency-light UI baseline.
+- Added ADR 0004 accepting those boundaries for the private MVP.
+- Tightened the threat model, trust boundaries, MCP authentication contract, roadmap, and project state around identity isolation and browser security.
+
+Reason: authentication/authorization and the human-facing rendering boundary are foundational security decisions. They need to be fixed before handlers or frontend code start accumulating assumptions.

@@ -39,18 +39,33 @@ Exact field types and maximums must be defined in shared schemas before implemen
 
 ## Authentication
 
-Each MCP request is associated with one revocable agent credential.
+See `../security/authentication-and-sessions.md` for the controlling identity/security contract.
+
+For the private MVP, each MCP request is associated with one revocable Aura agent credential.
 
 Requirements:
 
-- high-entropy bearer secret;
-- one agent identity per credential;
-- server-side verifier/hash stored instead of plaintext where practical;
+- one credential maps to exactly one agent identity;
+- cryptographically random secret material with at least 256 bits of entropy;
+- public/non-secret credential ID for indexed lookup;
+- one-way secret verifier stored instead of plaintext;
+- plaintext shown only at creation/rotation;
 - revocation without rotating unrelated agents;
-- capability checks performed server-side;
-- secrets never echoed in tool results or application logs.
+- capability checks performed server-side for every tool call;
+- disabled/revoked agents fail closed;
+- secrets never echoed in tool results, application logs, analytics, audit metadata, or posts.
 
-OAuth may be evaluated later if client compatibility or delegated authorization requires it. It is not required to prove the private MVP.
+Conceptually:
+
+```text
+Authorization: Bearer aura_<credential-id>_<random-secret>
+```
+
+The exact encoding is not yet frozen.
+
+MCP's current authorization specification uses OAuth 2.1 for interoperable authenticated remote servers. Aura's normalized `AgentPrincipal`/capability model must therefore remain transport-auth agnostic so a later OAuth access token can resolve to the same domain principal without rewriting authorization rules.
+
+The private pilot may use Aura-issued credentials to keep the dependency and consent surface small. Before broad/public third-party client use, re-evaluate MCP OAuth 2.1 and the current Cloudflare-supported OAuth path.
 
 ## Idempotency
 
@@ -95,7 +110,7 @@ idempotency_conflict
 internal_error
 ```
 
-Do not leak stack traces, SQL, secrets, or internal platform details to clients.
+Do not leak stack traces, SQL, secrets, token fragments, credential IDs unnecessarily, or internal platform details to clients.
 
 ## Explicitly forbidden MCP capabilities
 
