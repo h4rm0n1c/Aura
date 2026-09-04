@@ -10,9 +10,9 @@ Direct user instructions for the current task take precedence over this file.
 
 ## Current phase
 
-Aura is in **Phase 1: core contracts and local tests**.
+Aura is in **Phase 2: schema and identity foundation**.
 
-Do not jump to database/HTTP/UI feature work while a required domain or security contract is still unresolved. Follow `docs/roadmap.md`.
+Phase 1 contracts are now executable. Database work must encode those contracts rather than invent parallel IDs, roles, trust labels, errors, or authorization rules.
 
 ## Read before changing the repo
 
@@ -43,6 +43,8 @@ Changing these requires an explicit security/design decision:
 - agent credentials are individual, scoped, revocable, and never stored plaintext;
 - browser mutations require server-side authorization and CSRF protection;
 - raw post HTML is never trusted rendering output;
+- board content returned over MCP carries the untrusted-content label and provenance;
+- client input never supplies author identity, role, or capability authority;
 - rate/size/idempotency limits are server-enforced;
 - security-relevant credential/moderation events get durable audit records;
 - secrets/private board content do not enter commits, fixtures, logs, or error bodies.
@@ -51,75 +53,40 @@ If authority is ambiguous, stop and fix the contract first.
 
 ## Current toolchain
 
-Accepted Phase 1 baseline:
-
 ```text
 Node.js 24.20.0 LTS
 npm 11.19.0
 TypeScript using erasable syntax for current contract code
 ```
 
-Run:
+Run `npm test`.
 
-```bash
-npm test
-```
+Current code deliberately has zero npm dependencies. Follow ADR 0003 and ADR 0005: one lockfile, exact direct versions, lifecycle scripts denied, no ad-hoc package execution, prefer platform primitives, and review every dependency as a security change.
 
-Current code deliberately has zero npm dependencies. Node 24's native TypeScript stripping and built-in test runner are sufficient for these contracts.
+## Current core contracts
 
-Follow ADR 0003 and ADR 0005:
+`packages/core/` owns:
 
-- one committed lockfile;
-- exact direct versions when dependencies appear;
-- dependency lifecycle scripts denied by default;
-- no ad-hoc package execution/remote installers;
-- prefer Web Platform/Workers primitives;
-- do not add a framework or helper package for trivial convenience;
-- review every new dependency as a security change.
+- human/agent principals, roles, and capabilities;
+- pilot credential verification and CSRF;
+- stable Aura IDs;
+- domain error vocabulary;
+- board-content provenance/trust labels;
+- board/thread/solution/moderation authorization;
+- exact MCP argument/result types and validation limits.
 
-Wrangler is not yet in the dependency tree. Review and pin it when the first Worker deployment skeleton is introduced.
+Transport code translates into these contracts. It does not redefine them.
 
-## Human/agent trust model
+## Phase 2 database rules
 
-Server-owned identities:
-
-```text
-human: member | moderator | admin
-agent: explicit read/post/mark_solution capability set
-system: Aura-generated records/notices
-```
-
-Cloudflare Access authenticates a human; Aura still checks its human record/status/role.
-
-An MCP bearer credential authenticates one agent credential; Aura still checks revocation and its stored capability set.
-
-Display names, emails in post text, model names, form fields, or prompt claims do not elevate authority.
-
-## Dependency and supply-chain discipline
-
-Treat dependencies, build tools, and CI Actions as trusted-code expansion.
-
-- Prefer no dependency where a small auditable use of platform APIs suffices.
-- Do not add packages during exploration just to see if they help.
-- Do not auto-merge dependency updates.
-- Pin third-party CI Actions to full commit SHAs when CI is added.
-- Keep build/deploy permissions minimal.
-
-## Protocol/schema discipline
-
-Contracts come before handlers.
-
-Update the relevant docs/tests in the same change when altering:
-
-- authentication/authorization;
-- MCP tool/request/result shapes;
-- author/provenance/trust fields;
-- moderation/thread state;
-- database schema;
-- rate/size/idempotency rules;
-- rendering/security rules.
-
-Shared domain rules belong in `packages/core/`. Web/MCP adapters translate transport into core principals/contracts; they do not invent parallel authorization logic.
+- use typed Aura IDs from `src/domain/ids.ts` for durable human/agent/board/thread/post IDs;
+- keep credentials separate from agent identity records;
+- store agent secret verifiers only;
+- use foreign keys and constraints for relationships/state where D1 supports them;
+- create indexes for every planned lookup/list path before relying on them;
+- authorization remains in core/application logic even when DB constraints add defense in depth;
+- audit records must use stable actor/target IDs and must not contain secrets or normal post bodies;
+- migrations are numbered, immutable after deployment, and tested from an empty database.
 
 ## Development rules
 
@@ -127,30 +94,16 @@ Shared domain rules belong in `packages/core/`. Web/MCP adapters translate trans
 - Prefer small direct changes.
 - Reject invalid/unknown authority values rather than coercing them.
 - Fail closed at security boundaries.
-- Keep client-visible auth errors coarse; keep useful detail internal without logging secrets.
-- Use cryptographically secure platform randomness for credentials/tokens.
+- Keep client-visible auth errors coarse.
+- Use cryptographically secure platform randomness for credentials/IDs/tokens.
 - Add tests for security boundary changes before moving on.
 - Do not introduce queues, vector databases, WebSockets, federation, reputation systems, attachment pipelines, or generic execution without an accepted requirement.
 
 ## Documentation discipline
 
-After a non-trivial change:
+After a non-trivial change, update the owning contract/design doc, `docs/project-state.md` when the baseline changes, `docs/roadmap.md` when phase/gate state changes, and add a concise entry to `docs/agent/log.md`.
 
-- update the owning contract/design doc;
-- update `docs/project-state.md` when the accepted baseline changes;
-- update `docs/roadmap.md` when phase/gate state changes;
-- add a concise entry to `docs/agent/log.md`;
-- add new Markdown docs to `docs/README.md`.
-
-Do not create a new document when an existing current document already owns the information.
-
-## Testing expectations
-
-Security boundaries need tests, not faith.
-
-Current auth tests cover human identity mapping, disabled users, role-source isolation, agent token verification/revocation/capability validation, MCP bearer normalization, and CSRF binding/expiry/tampering.
-
-As work expands, add tests for object authorization, idempotency, rate/size limits, safe rendering, untrusted-content labels, secret-safe logging, and database constraints.
+Do not create a new document when a current document already owns the information.
 
 ## Git/GitHub
 

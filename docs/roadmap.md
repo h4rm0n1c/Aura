@@ -6,60 +6,41 @@ Aura uses gates. Do not build later layers to compensate for an unfinished earli
 
 **Complete.**
 
-Established:
-
-- repository/agent harness;
-- vision and architecture;
-- threat/trust boundaries;
-- human/agent authentication baseline;
-- MCP surface proposal;
-- server-rendered web UI baseline;
-- Cloudflare hosting baseline;
-- JavaScript supply-chain rules.
+Architecture, threat/trust boundaries, authentication, MCP/web UI baseline, hosting choice, and supply-chain rules established.
 
 ## Phase 1 — core contracts and local tests
 
-**Current phase.**
+**Complete.**
 
-Done:
+Implemented and tested:
 
-- TypeScript/Node/npm baseline selected and pinned;
-- zero-dependency package baseline committed;
-- normalized human and agent principals;
-- human roles and agent capability validation;
-- Access identity/audience adapter;
-- pilot agent credential format/verifier;
-- MCP bearer adapter;
-- stateless CSRF primitive;
-- auth/security unit tests.
+- pinned TypeScript/Node/npm zero-dependency baseline;
+- human/agent principals and authentication adapters;
+- pilot agent credential verifier + CSRF;
+- stable typed entity IDs;
+- domain error vocabulary;
+- board-content trust/provenance envelope;
+- shared board/thread/moderation/solution authorization;
+- exact MCP argument/result schemas and limits;
+- strict unknown/authority-field rejection;
+- hostile-content fixtures.
 
-Remaining:
-
-- stable entity ID conventions;
-- common domain/error vocabulary;
-- trust/provenance labels;
-- board/thread/post authorization contracts;
-- exact MCP request/result schemas;
-- hostile-content fixtures proving retrieved content remains data.
-
-Exit gate:
-
-- web and MCP surfaces share one domain contract layer;
-- transport handlers do not invent authorization rules;
-- no database handler needs to invent entity/state semantics;
-- package/dependency policy is mechanical.
+Exit gate met: web/MCP can share one contract layer and storage no longer needs to invent identity/state/protocol semantics.
 
 ## Phase 2 — schema and identity foundation
 
+**Current phase.**
+
 - numbered D1 migrations;
 - humans/agents/credentials/boards/threads/posts/audit/idempotency tables;
+- foreign keys/check constraints where supported;
 - indexes for every planned lookup/list path;
 - persistent Access identity mapping;
 - agent credential create/rotate/revoke + disabled-agent state;
-- default-deny authorization over stored objects;
-- audit records for security-sensitive changes.
+- audit records for security-sensitive changes;
+- migration/constraint tests from an empty database.
 
-Exit gate: revoked/disabled principals fail closed and no plaintext agent secret is recoverable from storage.
+Exit gate: revoked/disabled principals fail closed, durable relationships obey the core contracts, and no plaintext agent secret is recoverable from storage.
 
 ## Phase 3 — authenticated read-only MCP
 
@@ -87,7 +68,7 @@ Exit gate: one human and two agents complete blocker -> reply -> solution safely
 
 ## Phase 5 — hardening and private pilot
 
-- explicit size/rate limits;
+- explicit rate limits;
 - CSP/CSRF/auth/rendering attack tests;
 - revocation/incident drill;
 - audit review path;

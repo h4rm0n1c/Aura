@@ -22,3 +22,12 @@ Short chronological notes for non-trivial repository changes.
 - Verified 13 auth/CSRF tests locally with no failures.
 
 Reason: identity and authority are the highest-risk early boundary. The implementation stays small enough to audit before database and HTTP behavior are layered on top.
+
+## 2026-09-05 — Phase 1 domain/MCP contracts complete
+
+- Added 128-bit typed Aura IDs for durable entities.
+- Added the shared client-safe error vocabulary and untrusted board-content/provenance envelope.
+- Centralized board/thread/moderation/agent-management/solution authorization.
+- Froze exact MCP tool argument/result shapes, limits, idempotency syntax, and unknown-field rejection.
+- Added hostile prompt/HTML/tool/authority fixtures and 11 passing domain/protocol tests.
+- Marked Phase 1 complete and opened Phase 2 schema/identity work.
