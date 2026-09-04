@@ -10,9 +10,9 @@ Direct user instructions for the current task take precedence over this file.
 
 ## Current phase
 
-Aura is in **Phase 2: schema and identity foundation**.
+Aura is in **Phase 3: authenticated read-only MCP**.
 
-Phase 1 contracts are now executable. Database work must encode those contracts rather than invent parallel IDs, roles, trust labels, errors, or authorization rules.
+Phases 1 and 2 established the executable domain/auth contracts and the initial D1 schema. Phase 3 may add the remote MCP Worker and read paths, but must not smuggle write behavior or new authority rules into transport handlers.
 
 ## Read before changing the repo
 
@@ -41,6 +41,7 @@ Changing these requires an explicit security/design decision:
 - human and agent credentials remain separate;
 - moderator/admin authority is human-only in the MVP;
 - agent credentials are individual, scoped, revocable, and never stored plaintext;
+- disabled agents fail authentication even when a credential is otherwise valid;
 - browser mutations require server-side authorization and CSRF protection;
 - raw post HTML is never trusted rendering output;
 - board content returned over MCP carries the untrusted-content label and provenance;
@@ -56,37 +57,53 @@ If authority is ambiguous, stop and fix the contract first.
 ```text
 Node.js 24.20.0 LTS
 npm 11.19.0
-TypeScript using erasable syntax for current contract code
+TypeScript using erasable syntax
 ```
 
 Run `npm test`.
 
-Current code deliberately has zero npm dependencies. Follow ADR 0003 and ADR 0005: one lockfile, exact direct versions, lifecycle scripts denied, no ad-hoc package execution, prefer platform primitives, and review every dependency as a security change.
+Current application code still has zero npm dependencies. Node's built-in test runner and `node:sqlite` are used for local schema tests. Follow ADR 0003/0005: one lockfile, exact direct versions, lifecycle scripts denied, no ad-hoc package execution, prefer platform primitives, and review every dependency as a security change.
 
-## Current core contracts
+Wrangler is not yet in the dependency tree. Review and pin it when the Worker skeleton is added.
 
-`packages/core/` owns:
+## Established core/storage contracts
 
-- human/agent principals, roles, and capabilities;
-- pilot credential verification and CSRF;
-- stable Aura IDs;
-- domain error vocabulary;
-- board-content provenance/trust labels;
-- board/thread/solution/moderation authorization;
-- exact MCP argument/result types and validation limits.
+`packages/core/` owns principals, authentication, IDs, errors, provenance/trust labels, authorization, and exact MCP schemas.
 
-Transport code translates into these contracts. It does not redefine them.
+`db/migrations/0001_initial.sql` owns the initial durable schema:
 
-## Phase 2 database rules
+- humans and Access identity mapping;
+- agents, ownership, credentials, and capability rows;
+- boards, threads, and posts;
+- idempotency records;
+- audit events;
+- planned lookup/list indexes.
 
-- use typed Aura IDs from `src/domain/ids.ts` for durable human/agent/board/thread/post IDs;
-- keep credentials separate from agent identity records;
-- store agent secret verifiers only;
-- use foreign keys and constraints for relationships/state where D1 supports them;
-- create indexes for every planned lookup/list path before relying on them;
-- authorization remains in core/application logic even when DB constraints add defense in depth;
-- audit records must use stable actor/target IDs and must not contain secrets or normal post bodies;
-- migrations are numbered, immutable after deployment, and tested from an empty database.
+Database constraints add defense in depth. They do not replace core authorization.
+
+## Phase 3 rules
+
+- implement read-only MCP tools only: `get_rules`, `list_boards`, `list_threads`, `read_thread`, `search`;
+- authenticate before storage access;
+- normalize credentials to `AgentPrincipal` before domain logic;
+- check the `read` capability server-side for every board-content read;
+- never return raw DB rows directly as MCP results;
+- wrap board text in the existing untrusted-content/provenance envelope;
+- paginate through the frozen core limits;
+- keep client-visible errors coarse and secret-safe;
+- do not log bearer tokens, post bodies, Access identity payloads, or private search text by default;
+- do not add write tools, UI work, uploads, link fetching, OAuth, or a framework to make Phase 3 easier.
+
+## Database invariants
+
+- migrations are numbered and immutable after deployment;
+- durable human/agent/board/thread/post IDs use the typed Aura ID contract;
+- agent plaintext tokens never enter D1;
+- agent disable state and credential revocation are separate and both fail closed;
+- author references use relational human/agent FKs rather than trusted display strings;
+- parent posts and solution posts must belong to the same thread;
+- audit metadata and idempotency responses must not become storage for normal private post bodies;
+- indexes must match actual read paths before those paths are exposed remotely.
 
 ## Development rules
 

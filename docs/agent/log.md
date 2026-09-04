@@ -31,3 +31,15 @@ Reason: identity and authority are the highest-risk early boundary. The implemen
 - Froze exact MCP tool argument/result shapes, limits, idempotency syntax, and unknown-field rejection.
 - Added hostile prompt/HTML/tool/authority fixtures and 11 passing domain/protocol tests.
 - Marked Phase 1 complete and opened Phase 2 schema/identity work.
+
+## 2026-09-05 — Phase 2 D1 schema and identity lifecycle complete
+
+- Added `0001_initial.sql` for humans, agents, credentials/capabilities, boards, threads, posts, idempotency, audit, and planned indexes.
+- Added relational author constraints plus same-thread parent-post and solution-post enforcement.
+- Kept agent plaintext tokens out of storage; D1 stores only the verifier and credential state.
+- Added agent disabled-state checking to core credential authentication.
+- Added 10 migration/constraint/index tests and one stored credential lifecycle test.
+- Verified credential rotation, independent revocation, agent disable, and verifier-only storage locally.
+- Marked Phase 2 complete and opened authenticated read-only MCP work.
+
+Reason: the database now encodes the accepted trust/identity relationships without becoming a second authorization system.

@@ -25,31 +25,39 @@ Implemented and tested:
 - strict unknown/authority-field rejection;
 - hostile-content fixtures.
 
-Exit gate met: web/MCP can share one contract layer and storage no longer needs to invent identity/state/protocol semantics.
-
 ## Phase 2 — schema and identity foundation
 
-**Current phase.**
+**Complete.**
 
-- numbered D1 migrations;
-- humans/agents/credentials/boards/threads/posts/audit/idempotency tables;
-- foreign keys/check constraints where supported;
-- indexes for every planned lookup/list path;
-- persistent Access identity mapping;
-- agent credential create/rotate/revoke + disabled-agent state;
-- audit records for security-sensitive changes;
-- migration/constraint tests from an empty database.
+Implemented and tested:
 
-Exit gate: revoked/disabled principals fail closed, durable relationships obey the core contracts, and no plaintext agent secret is recoverable from storage.
+- numbered initial D1 migration;
+- humans + Access identity mapping;
+- agents + human ownership + disabled state;
+- verifier-only credentials + closed capability rows;
+- boards/threads/posts with relational author integrity;
+- same-thread parent and solution constraints;
+- post visibility attribution;
+- per-agent idempotency records;
+- audit events;
+- planned query indexes;
+- credential rotation/revocation/agent-disable lifecycle test.
+
+Exit gate met: revoked/disabled principals fail closed, durable relationships obey the core contracts, and no plaintext agent secret is recoverable from the credential table.
 
 ## Phase 3 — authenticated read-only MCP
 
+**Current phase.**
+
+- review/pin the minimum Worker/MCP deployment tooling;
 - remote MCP Worker skeleton;
+- D1 read adapters;
 - authenticated `get_rules`, `list_boards`, `list_threads`, `read_thread`, `search`;
-- per-agent capability checks;
+- per-agent `read` capability checks;
 - structured untrusted-content metadata;
 - pagination/rate/error handling;
-- secret-safe logging.
+- secret-safe logging;
+- deployment smoke test with at least two distinct agent credentials.
 
 Exit gate: two distinct MCP clients can authenticate as different agents against the same private board without impersonation or content/authority confusion.
 
