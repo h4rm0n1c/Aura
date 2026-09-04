@@ -4,56 +4,55 @@ Last updated: 2026-09-05.
 
 ## Current phase
 
-**Phase 0 — repository and contracts.**
+**Phase 1 — core contracts and local tests.**
 
-No production implementation exists yet.
+Phase 0's architecture, security, authentication, MCP, UI, hosting, and supply-chain baselines are established.
 
 ## Accepted baseline
 
 - Aura is a private, human-moderated message board for human/AI collaborative problem solving.
-- Humans and agents participate in the same durable thread model.
 - Board content is untrusted third-party data.
-- Aura will not provide generic execution, arbitrary URL fetching, file uploads, or tool brokerage in the MVP.
-- Human and agent identity are separate authentication planes.
-- Cloudflare Access is the private-MVP human authentication boundary; Aura will not implement local passwords or a second browser authentication session by default.
-- Aura owns human roles/authorization after Access establishes identity.
-- Agent identities use individually revocable, high-entropy credentials with one-way verifier storage for the private pilot.
-- Agent credentials map to a small server-owned capability set and never inherit the owning human's role.
-- The internal agent-principal model must remain compatible with later MCP OAuth 2.1 support.
-- Human moderation remains a separate authority boundary and is not granted to agents in the MVP.
-- Human web mutations require CSRF protection and server-side authorization.
-- The web UI baseline is server-rendered HTML with minimal local JavaScript, no SPA/frontend framework by default, no third-party frontend assets, and restrictive browser security headers.
-- The proposed deployment baseline is Cloudflare Workers + D1, with Cloudflare Access protecting the human surface.
-- The MCP transport baseline is remote Streamable HTTP.
-- Shared domain rules should live in a vendor-neutral core package.
-- TypeScript is a leading implementation candidate because of the Cloudflare baseline, but the implementation language/runtime is not yet an accepted decision.
-- If JavaScript/TypeScript and npm are selected, ADR 0003's dependency-minimisation and supply-chain controls are mandatory baseline requirements.
+- Humans and agents use separate authentication planes.
+- Cloudflare Access authenticates humans; Aura owns human roles and enabled/disabled state.
+- Aura stores no local human passwords for the private MVP.
+- Agents use individually revocable credentials and a small explicit capability set.
+- Agent authority never inherits a human owner's moderator/admin role.
+- Web mutations require server-side authorization and CSRF protection.
+- The UI remains server-rendered HTML with minimal local JavaScript and no frontend framework by default.
+- Cloudflare Workers + D1 remain the deployment/storage baseline.
+- Remote MCP uses Streamable HTTP.
+- TypeScript is now the accepted implementation language for the Worker path.
+- Local toolchain: Node.js 24.20.0 LTS + npm 11.19.0.
+- The current code has zero npm dependencies.
+- npm lifecycle scripts are denied by default and direct dependency versions will be exact.
 
-## Repository state
+## Implemented Phase 1 auth foundation
 
-The repository contains planning documents and directory ownership placeholders only. Implementation directories should remain small until Phase 1 fixes the runtime/package choices and core schemas.
+The repository now contains:
+
+- normalized `HumanPrincipal` / `AgentPrincipal` contracts;
+- human roles and agent capability validation;
+- Access identity/audience normalization;
+- web authentication adapter with Aura-record lookup;
+- structured 256-bit agent credentials with one-way verifier storage;
+- MCP bearer authentication adapter;
+- stateless HMAC-SHA-256 CSRF tokens bound to principal + action + time;
+- built-in Node test coverage for the above.
+
+Current local test result: **13 passed, 0 failed**.
 
 ## Open questions
 
-These are intentionally unresolved:
-
-1. Exact implementation language/runtime and web router/framework choice, if any. TypeScript with minimal/no framework is the current leading candidate, not a locked decision.
-2. Exact Node/npm versions and mechanical package-policy configuration if TypeScript/npm is selected.
-3. Whether web and MCP deploy as two Workers from one workspace or one Worker with isolated routes. The current architecture prefers two logical surfaces; deployment packaging can still change.
-4. Exact post size/rate limits.
-5. Search semantics for the MVP beyond indexed text/metadata queries.
-6. Whether `mark_solution` is available to the creating agent, its human operator, humans generally, or only configured roles.
-7. Exact agent-secret verifier implementation and token encoding, subject to the requirements in `security/authentication-and-sessions.md`.
-8. Exact MCP clients to support during the pilot and whether any require standards-based OAuth rather than pilot bearer credentials.
-9. Exact representation of Access identity in the Worker integration and the tested mapping from verified provider subject to Aura `human_id`.
-10. Exact Markdown subset, if any, beyond escaped plain text/code blocks.
+1. Whether web and MCP deploy as two Workers or one deployment with isolated entry routes.
+2. Exact D1 schema and indexes for humans, agents, credentials, boards, threads, posts, audit, and idempotency.
+3. Exact post/rate limits.
+4. `mark_solution` authorization semantics.
+5. Exact MVP search behavior.
+6. Exact Markdown subset beyond escaped text/code blocks.
+7. Which pilot MCP clients, if any, require OAuth 2.1 instead of Aura pilot credentials.
 
 ## Next useful work
 
-Phase 0 should close with authentication/UI/security documents indexed and internally consistent.
+Finish the remaining Phase 1 domain contracts that the database will depend on: stable IDs, common error vocabulary, board/thread/post trust labels, and authorization boundaries.
 
-Phase 1 should then choose the smallest viable implementation/runtime structure and write principal/domain schemas plus authorization tests before HTTP handlers.
-
-If TypeScript/npm is selected, the first scaffolding change should establish the pinned toolchain/dependency policy before adding application libraries.
-
-Do not start with a SPA, live updates, CSS framework, or deployment automation.
+Do not start database migrations or HTTP handlers until those contracts are small and settled.

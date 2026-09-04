@@ -4,27 +4,21 @@ Short chronological notes for non-trivial repository changes.
 
 ## 2026-09-05 — initial repository bootstrap
 
-- Established the Aura project charter and repository skeleton.
-- Added an `AGENTS.md` operating harness distilled from useful patterns in existing h4rm0n1c repositories.
-- Added the vision, architecture, threat model, trust boundary, MCP proposal, roadmap, current-state record, and initial ADRs.
-- Kept implementation directories as ownership placeholders so framework choices do not outrun contracts.
-
-Reason: Aura's main early risks are authority confusion, prompt injection, credential boundaries, and premature feature sprawl. Those are cheaper to settle before implementation.
+- Established the Aura project charter, repository skeleton, agent harness, architecture/security documents, roadmap, and initial ADRs.
 
 ## 2026-09-05 — JavaScript supply-chain baseline
 
-- Corrected the roadmap/project state so TypeScript is a leading candidate rather than an already-made language decision.
-- Added ADR 0003 for dependency-minimal npm/TypeScript operation if that path is selected.
-- Added exact-version, lockfile, lifecycle-script, dependency-review, CI Action pinning, and no-ad-hoc-package-execution rules to the agent harness and threat model.
-- Recorded `wrangler types` as the preferred Worker runtime typing path where it avoids an extra package.
-
-Reason: the Cloudflare/TypeScript path is attractive for cost and deployment simplicity, but Aura should not casually inherit the JavaScript ecosystem's full supply-chain attack surface.
+- Added dependency-minimal npm/TypeScript rules, exact-version/lockfile policy, disabled lifecycle scripts, dependency review, and pinned-CI expectations.
 
 ## 2026-09-05 — authentication and web UI baseline
 
-- Added `security/authentication-and-sessions.md` with separate human/agent identity planes, Access-backed human identity, Aura-owned roles, per-agent credentials, CSRF requirements, audit rules, and an OAuth-compatible normalized principal model.
-- Added `web-ui.md` with a server-rendered, minimal-JavaScript, dependency-light UI baseline.
-- Added ADR 0004 accepting those boundaries for the private MVP.
-- Tightened the threat model, trust boundaries, MCP authentication contract, roadmap, and project state around identity isolation and browser security.
+- Defined separate human/agent identity planes, Access-backed human auth, per-agent credentials, CSRF requirements, OAuth-compatible normalized principals, and a server-rendered minimal-JavaScript UI.
 
-Reason: authentication/authorization and the human-facing rendering boundary are foundational security decisions. They need to be fixed before handlers or frontend code start accumulating assumptions.
+## 2026-09-05 — Phase 1 auth contracts implemented
+
+- Selected TypeScript with Node 24.20.0/npm 11.19.0 and a zero-dependency starting tree.
+- Implemented human/agent principals, role/capability validation, structured agent credentials, one-way verifier checks, Access identity/audience normalization, surface auth adapters, and HMAC CSRF tokens.
+- Corrected the Access durable identity key from the earlier `sub` assumption to the current Access identity `id` field.
+- Verified 13 auth/CSRF tests locally with no failures.
+
+Reason: identity and authority are the highest-risk early boundary. The implementation stays small enough to audit before database and HTTP behavior are layered on top.

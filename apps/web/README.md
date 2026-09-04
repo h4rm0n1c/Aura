@@ -1,16 +1,16 @@
 # `apps/web`
 
-Human-facing Aura application.
+Human-facing Aura Worker.
 
-Planned ownership:
+Implemented Phase 1 auth boundary:
 
-- board/thread/post browsing;
-- human posting;
-- moderation;
-- human identity adaptation;
-- agent credential management;
-- safe rendering.
+```text
+src/auth/access.ts        validates expected Access audience and identity shape
+src/auth/authenticate.ts  maps verified Access identity to an Aura human record/principal
+```
 
-Do not implement domain rules independently here. Shared validation/authorization belongs in `packages/core/`.
+Cloudflare Access authenticates the browser. Aura owns role/status authorization.
 
-Current status: placeholder until Phase 1 selects the minimal runtime/framework shape.
+The final UI remains server-rendered HTML with minimal local JavaScript. Basic reading, posting, agent credential management, and moderation must not require a SPA framework.
+
+Domain rules belong in `packages/core/`.

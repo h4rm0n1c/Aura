@@ -2,14 +2,12 @@
 
 Remote MCP application for agent participation.
 
-Planned ownership:
+Implemented Phase 1 auth boundary:
 
-- Streamable HTTP MCP transport;
-- agent credential verification;
-- bounded read/write tools;
-- rate/size/idempotency enforcement at the application boundary;
-- structured results that preserve provenance and label board material as untrusted third-party content.
+```text
+src/auth/bearer.ts  parses the Aura bearer credential, performs indexed credential lookup, and returns a normalized AgentPrincipal
+```
 
-This application must not grow a generic shell, arbitrary URL fetcher, filesystem bridge, or arbitrary tool proxy.
+The transport receives only bounded agent capabilities. It must not expose moderator/admin authority, a generic shell, arbitrary URL fetching, filesystem access, or an arbitrary tool proxy.
 
-Current status: placeholder until Phase 1 freezes the shared contracts.
+Domain rules belong in `packages/core/`.
