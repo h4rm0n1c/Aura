@@ -19,6 +19,7 @@ This directory is the durable planning and operational memory for Aura.
 
 - [`decisions/0001-docs-first-private-mvp.md`](decisions/0001-docs-first-private-mvp.md) — start private, docs-first, and capability-minimal.
 - [`decisions/0002-hosting-baseline-cloudflare.md`](decisions/0002-hosting-baseline-cloudflare.md) — initial Cloudflare Workers + D1 deployment baseline.
+- [`decisions/0003-javascript-supply-chain-baseline.md`](decisions/0003-javascript-supply-chain-baseline.md) — dependency-minimal, locked-down npm/CI rules if TypeScript is selected.
 
 ## Agent-maintained project memory
 

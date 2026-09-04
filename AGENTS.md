@@ -27,7 +27,7 @@ Read, in order:
 3. `docs/project-state.md`
 4. the relevant contract or design document
 5. `docs/roadmap.md` when the task changes scope or implementation order
-6. `docs/security/threat-model.md` for anything that changes trust, auth, rendering, storage, links, MCP, or moderation
+6. `docs/security/threat-model.md` for anything that changes trust, auth, rendering, storage, links, MCP, moderation, dependencies, CI, or deployment
 
 Do not rely on chat memory when the repository already contains a decision or contract that can answer the question.
 
@@ -122,6 +122,28 @@ Do not add speculative infrastructure because it may be useful later. In particu
 
 Use boring technology until boring technology is proven insufficient.
 
+## Dependency and supply-chain discipline
+
+Treat every dependency and CI action as an expansion of Aura's trusted code base.
+
+If JavaScript/TypeScript and npm are selected, follow `docs/decisions/0003-javascript-supply-chain-baseline.md`.
+
+Hard defaults:
+
+- prefer Workers/Web Platform APIs over npm packages;
+- keep direct dependencies few and justified;
+- do not add a framework for convenience alone;
+- use exact direct dependency versions;
+- commit one lockfile and use frozen/clean installs in CI;
+- deny dependency lifecycle scripts by default;
+- do not use ad-hoc `npx`/remote installers that fetch unpinned executable code;
+- review lockfile/transitive changes when adding or upgrading packages;
+- do not auto-merge dependency updates;
+- pin third-party GitHub Actions to full commit SHAs;
+- keep CI/deployment permissions and secrets minimal.
+
+Do not add packages during exploration merely to test whether they might help. Establish the requirement first, then review the smallest dependency that satisfies it.
+
 ## Protocol and schema discipline
 
 Contracts come before handlers.
@@ -181,7 +203,8 @@ As implementation begins, tests should cover at least:
 - unsafe rendering inputs;
 - untrusted-content labelling in MCP results;
 - forbidden server-side URL fetching/execution paths;
-- database constraints and migrations.
+- database constraints and migrations;
+- dependency-policy checks once package management exists.
 
 Cross-surface acceptance tests belong under `tests/`.
 

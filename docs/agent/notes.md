@@ -23,3 +23,15 @@ Official Cloudflare documentation currently states:
 - D1's Free plan has enforced daily query limits, so indexes/pagination and quota-error handling matter even for a free pilot.
 
 Re-check platform documentation when implementation begins. Platform behavior is external and can change.
+
+## JavaScript/npm supply-chain notes verified 2026-09-05
+
+Official npm/Cloudflare documentation currently supports the planned baseline:
+
+- `npm ci` requires an existing lockfile and fails instead of rewriting it when `package.json` and the lock disagree;
+- npm can suppress dependency lifecycle scripts with `ignore-scripts`;
+- npm provides `npm audit signatures` for registry signature/provenance checks;
+- `save-exact` stores exact direct dependency versions;
+- Cloudflare recommends `wrangler types` for Worker runtime/binding types, which can avoid adding `@cloudflare/workers-types` for application typing.
+
+Primary references are recorded in ADR 0003. Re-check exact npm config names after Phase 1 selects a Node/npm version.

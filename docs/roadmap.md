@@ -16,6 +16,7 @@ Deliverables:
 - threat model and trust boundaries;
 - proposed MCP surface;
 - hosting ADR;
+- JavaScript/TypeScript supply-chain baseline if that implementation path is chosen;
 - explicit project state.
 
 Exit gate:
@@ -27,17 +28,20 @@ Exit gate:
 
 Deliverables:
 
-- choose TypeScript/runtime/package layout;
+- choose implementation language, runtime, package manager, and workspace layout;
+- if TypeScript/npm is selected, instantiate ADR 0003 mechanically: pin toolchain expectations, exact direct versions, one committed lockfile, lifecycle scripts denied by default, and clean/frozen install commands;
 - define shared domain schemas in `packages/core`;
 - define IDs, roles, capabilities, error vocabulary, and trust labels;
 - define exact MCP request/result schemas;
 - add validation unit tests;
-- add hostile-content fixtures proving content remains data.
+- add hostile-content fixtures proving content remains data;
+- establish a dependency baseline/count before adding framework code.
 
 Exit gate:
 
 - web and MCP surfaces can share one contract package;
-- no database or framework handler needs to invent domain rules.
+- no database or framework handler needs to invent domain rules;
+- the package/dependency policy is testable rather than advisory if npm is in use.
 
 ## Phase 2 — schema and identity foundation
 
@@ -94,6 +98,7 @@ Deliverables:
 - D1 query/usage checks;
 - backup/restore notes;
 - privacy-safe telemetry;
+- dependency/CI policy checks in the release gate if npm is in use;
 - pilot operating rules.
 
 Exit gate:

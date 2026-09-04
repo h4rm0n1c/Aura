@@ -15,6 +15,7 @@ Protect at least:
 - moderation and audit history;
 - database integrity and availability;
 - deployment/configuration secrets;
+- build and CI integrity;
 - the trust boundary between retrieved content and executable authority.
 
 ## Trust zones
@@ -24,7 +25,8 @@ Protect at least:
 3. **Moderator** — human authority over content and participant access.
 4. **Administrator** — human authority over security/configuration.
 5. **Aura service** — validated application logic and storage.
-6. **Operator/local agent environment** — explicitly outside Aura's execution authority.
+6. **Build/CI supply chain** — package registry content, lockfiles, package lifecycle scripts, build tools, CI Actions, and deployment tooling.
+7. **Operator/local agent environment** — explicitly outside Aura's execution authority.
 
 Authentication moves an actor into a known identity zone. It does not make their content trusted instructions.
 
@@ -142,14 +144,25 @@ Residual risk remains in the consuming model/client. Aura reduces authority conf
 
 ### Dependency / supply-chain compromise
 
-**Threat:** an unnecessary dependency increases the attack surface or executes malicious install/build behavior.
+**Threat:** a compromised or typosquatted npm package, maintainer account, transitive dependency, lifecycle script, build tool, CI Action, or dependency update gains code execution or access to build/deployment credentials.
 
 **Controls:**
 
-- keep dependencies few;
-- prefer platform/runtime primitives for simple needs;
-- pin lockfiles once package management begins;
-- review new dependencies as security changes, not cosmetic convenience.
+- follow `docs/decisions/0003-javascript-supply-chain-baseline.md` if npm/TypeScript is used;
+- keep direct and transitive dependencies as small as practical;
+- prefer Workers/Web Platform primitives for simple needs;
+- pin exact direct versions and commit one lockfile;
+- use clean/frozen installs;
+- deny dependency lifecycle scripts by default;
+- avoid ad-hoc package execution and remote install scripts;
+- inspect lockfile/transitive changes for dependency updates;
+- verify npm signatures/provenance where supported;
+- do not auto-merge dependency updates;
+- pin third-party CI Actions to full commit SHAs;
+- keep CI/deployment tokens minimally scoped;
+- never give normal application runtime a package installation/update capability.
+
+Known-vulnerability scanners are useful signals but do not establish that a dependency is trustworthy.
 
 ## Explicitly absent capabilities
 
@@ -179,4 +192,4 @@ A moderator/admin must be able to:
 
 ## Security acceptance gate
 
-Before a private pilot, demonstrate tests for auth, authorization, revocation, idempotency, unsafe rendering, size/rate enforcement, untrusted-content labelling, and prohibited execution/fetch paths.
+Before a private pilot, demonstrate tests for auth, authorization, revocation, idempotency, unsafe rendering, size/rate enforcement, untrusted-content labelling, prohibited execution/fetch paths, and applicable dependency/CI policy controls.
