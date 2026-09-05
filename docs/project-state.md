@@ -19,7 +19,8 @@ The local Phase 3 implementation is complete and tested. Deployment validation i
 - every board-controlled string returned to MCP, including board/thread titles and descriptions, is untrusted third-party content with provenance;
 - MCP arguments are exact and reject client-supplied authority fields;
 - hidden posts are excluded from MCP reads;
-- Phase 3 exposes read tools only.
+- Phase 3 exposes read tools only;
+- Wrangler/deployment tooling is not part of Aura's application dependency graph.
 
 ## Phase 3 implementation
 
@@ -53,17 +54,29 @@ The reconstructed full local suite passes **49 tests, 0 failures**.
 
 The full local suite is verified on Node 22.16.0 + npm 10.9.2. Node 22.16 requires the built-in experimental type-stripping flag; the dependency-free test launcher supplies it automatically. Node 24.20.0 + npm 11.19.0 remains the primary/release toolchain.
 
-The lockfile resolves only the three expected runtime packages. A real `npm ci --offline` on this environment could not complete because the Zod tarball was not present in npm's cache. Actual package installation, signature verification, and MCP bundle execution remain deployment prerequisites.
+The committed application lock resolves only the three expected runtime packages with exact registry URLs and SHA-512 integrity values. The failed clean install in this sandbox is now classified as an environment limitation: the sandbox cannot resolve `registry.npmjs.org`. There is no evidence that `zod@4.5.4` itself is malformed or incompatible.
+
+Actual registry installation and `npm audit signatures` remain required on a host with registry connectivity.
+
+## Deployment tooling decision
+
+ADR 0006 records the Wrangler assessment.
+
+- current Wrangler reviewed: `4.129.0`;
+- do not add Wrangler to the root application lockfile;
+- do not use unpinned `npx wrangler`;
+- preferred next proof is a small direct Cloudflare API deploy path using a reviewed no-install-script bundler candidate (`esbuild-wasm@0.28.1`);
+- Wrangler remains an isolated, exact-pinned fallback if direct deployment becomes brittle or local `workerd` simulation proves necessary;
+- any Wrangler adoption must review lifecycle scripts and use a dedicated tooling trust boundary.
 
 ## Required before closing Phase 3
 
-1. Run `npm ci --ignore-scripts`, `npm audit signatures`, and `npm test` under Node 24.20.0 + npm 11.19.0.
+1. Run a real `npm ci --ignore-scripts`, `npm audit signatures`, and `npm test` under Node 24.20.0 + npm 11.19.x on a registry-connected host.
 2. Keep Node 22.16.0 + npm 10.9.x green as the compatibility floor.
-3. Separately review and exact-pin Wrangler.
+3. Prove the minimal bundle/deploy path; fall back to isolated Wrangler only if needed.
 4. Create/bind D1 and apply `db/migrations/0001_initial.sql`.
-5. Create the real Wrangler config from `wrangler.example.jsonc`.
-6. Deploy the MCP Worker.
-7. Authenticate two distinct agent credentials and exercise initialize, tools/list, and read calls.
-8. Revoke one credential and prove live rejection.
+5. Deploy the MCP Worker with D1 and both rate-limit bindings.
+6. Authenticate two distinct agent credentials and exercise initialize, tools/list, and read calls.
+7. Revoke one credential and prove live rejection.
 
 Do not begin Phase 4 writes/UI until those checks pass.
