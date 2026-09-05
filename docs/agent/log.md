@@ -28,5 +28,12 @@ Short chronological notes for non-trivial repository changes.
 - Added D1 credential/read adapters, opaque cursors, five read-only MCP tools, and untrusted envelopes for titles as well as post bodies.
 - Added strict Host/Origin policy, JSON POST enforcement, Cloudflare rate-limit hooks, credential expiry enforcement, and a 64 KiB MCP request-body ceiling.
 - Reconstructed and ran the full repository suite: 49 passed, 0 failed.
-- Kept Phase 3 open because real Node 24 package installation/signature verification, Wrangler review, deployment, two-agent smoke tests, and live revocation are still pending.
+- Kept Phase 3 open because real Node 24 package installation/signature verification, deployment, two-agent smoke tests, and live revocation are still pending.
 - Added Node 22.16.0 + npm 10.9.x as a supported compatibility lane; `npm test` now selects Node's built-in strip-types flag only where Node 22.16 requires it.
+
+## 2026-09-05 — deployment tooling supply-chain review
+
+- Confirmed the apparent Zod install problem was a sandbox registry/DNS limitation, not evidence of a bad `zod@4.5.4` lock entry.
+- Reviewed current Wrangler `4.129.0`, its direct dependency surface, lifecycle-script requirements, and Cloudflare's own package-age/build-script controls.
+- Kept Wrangler out of Aura's root application lockfile.
+- Accepted ADR 0006: first prove a small direct Cloudflare API deployment path with a no-install-script bundler candidate; keep exact-pinned isolated Wrangler as the fallback if needed.
