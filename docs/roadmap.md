@@ -27,13 +27,14 @@ Implemented:
 - untrusted-content/provenance wrapping for board-controlled text;
 - opaque pagination cursors;
 - Host/Origin validation, JSON POST enforcement, body ceiling, coarse rate limiting and secret-safe errors;
-- 49-test full local suite.
+- 49-test full local suite;
+- Wrangler/deployment-tool supply-chain assessment in ADR 0006.
 
 Remaining exit work:
 
 - real install/signature check on primary Node 24/npm 11; keep Node 22.16/npm 10.9 compatibility green;
-- review/pin Wrangler;
-- create/apply D1 and deploy Worker;
+- prove the small direct Cloudflare API bundle/deploy path, using isolated Wrangler only if the direct path becomes brittle;
+- create/apply D1 and deploy Worker with D1/rate-limit bindings;
 - two distinct MCP agent smoke tests;
 - live credential-revocation test.
 
