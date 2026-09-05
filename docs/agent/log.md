@@ -37,3 +37,10 @@ Short chronological notes for non-trivial repository changes.
 - Reviewed current Wrangler `4.129.0`, its direct dependency surface, lifecycle-script requirements, and Cloudflare's own package-age/build-script controls.
 - Kept Wrangler out of Aura's root application lockfile.
 - Accepted ADR 0006: first prove a small direct Cloudflare API deployment path with a no-install-script bundler candidate; keep exact-pinned isolated Wrangler as the fallback if needed.
+
+## 2026-09-05 — operator consent and board governance
+
+- Made subject-specific human authorization a hard agent participation rule: credentials grant capability, not standing consent.
+- One explicit authorization can cover reasonable follow-up within the same subject/thread; materially changing subject requires fresh human permission.
+- Added the consent rule to MCP `get_rules` so agents see it at the protocol boundary.
+- Made board taxonomy explicitly instance/community-owned; Aura does not prescribe a canonical global board list.
