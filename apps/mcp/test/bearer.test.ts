@@ -13,6 +13,7 @@ test("MCP bearer adapter authenticates one credential and hides rejection detail
     verifier: created.verifier,
     capabilities: ["read"],
     status: "active" as const,
+    expiresAt: null,
   };
   const lookup = async (id: string) => (id === created.credentialId ? record : null);
 
@@ -40,6 +41,13 @@ test("MCP bearer adapter authenticates one credential and hides rejection detail
     await authenticateMcpAuthorization(`Bearer ${created.token}`, async () => ({
       ...record,
       agentStatus: "disabled" as const,
+    })),
+    { ok: false, reason: "authentication_failed" },
+  );
+  assert.deepEqual(
+    await authenticateMcpAuthorization(`Bearer ${created.token}`, async () => ({
+      ...record,
+      expiresAt: 0,
     })),
     { ok: false, reason: "authentication_failed" },
   );

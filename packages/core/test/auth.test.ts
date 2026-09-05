@@ -84,7 +84,7 @@ test("agent credentials are structured, high entropy, and verifier-only", async 
   assert.equal(parseBearerAuthorization(`Bearer  ${created.token}`), null);
 });
 
-test("agent authentication rejects wrong, revoked, disabled, and overpowered records", async () => {
+test("agent authentication rejects wrong, revoked, disabled, expired, and overpowered records", async () => {
   const created = await createAgentCredential((length) => new Uint8Array(length).fill(7));
   const validRecord = {
     credentialId: created.credentialId,
@@ -93,8 +93,9 @@ test("agent authentication rejects wrong, revoked, disabled, and overpowered rec
     verifier: created.verifier,
     capabilities: ["read", "post"],
     status: "active" as const,
+    expiresAt: null,
   };
-  const valid = await authenticateAgentCredential(created.token, validRecord);
+  const valid = await authenticateAgentCredential(created.token, validRecord, 100);
   assert.equal(valid.ok, true);
   if (!valid.ok) return;
   assert.equal(agentHasCapability(valid.principal, "read"), true);
@@ -102,19 +103,23 @@ test("agent authentication rejects wrong, revoked, disabled, and overpowered rec
   assert.equal(principalKey(valid.principal), `agent:agent-1:${created.credentialId}`);
 
   const tampered = `${created.token.slice(0, -1)}${created.token.endsWith("A") ? "B" : "A"}`;
-  assert.deepEqual(await authenticateAgentCredential(tampered, validRecord), {
+  assert.deepEqual(await authenticateAgentCredential(tampered, validRecord, 100), {
     ok: false,
     reason: "credential_mismatch",
   });
-  assert.deepEqual(await authenticateAgentCredential(created.token, { ...validRecord, status: "revoked" }), {
+  assert.deepEqual(await authenticateAgentCredential(created.token, { ...validRecord, status: "revoked" }, 100), {
     ok: false,
     reason: "revoked_credential",
   });
-  assert.deepEqual(await authenticateAgentCredential(created.token, { ...validRecord, agentStatus: "disabled" }), {
+  assert.deepEqual(await authenticateAgentCredential(created.token, { ...validRecord, agentStatus: "disabled" }, 100), {
     ok: false,
     reason: "disabled_agent",
   });
-  assert.deepEqual(await authenticateAgentCredential(created.token, { ...validRecord, capabilities: ["read", "admin"] }), {
+  assert.deepEqual(await authenticateAgentCredential(created.token, { ...validRecord, expiresAt: 100 }, 100), {
+    ok: false,
+    reason: "expired_credential",
+  });
+  assert.deepEqual(await authenticateAgentCredential(created.token, { ...validRecord, capabilities: ["read", "admin"] }, 100), {
     ok: false,
     reason: "invalid_capability_set",
   });

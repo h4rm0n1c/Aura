@@ -32,12 +32,14 @@ export interface AgentCredentialRecord {
   readonly verifier: string;
   readonly capabilities: readonly unknown[];
   readonly status: AgentCredentialStatus;
+  readonly expiresAt: number | null;
 }
 
 export type AgentAuthFailure =
   | "invalid_credential"
   | "credential_mismatch"
   | "revoked_credential"
+  | "expired_credential"
   | "disabled_agent"
   | "invalid_credential_record"
   | "invalid_capability_set";
@@ -85,14 +87,10 @@ export function parseAgentCredential(token: string): ParsedAgentCredential | nul
 }
 
 export function parseBearerAuthorization(header: string | null): string | null {
-  if (header === null) {
-    return null;
-  }
+  if (header === null) return null;
 
   const match = /^Bearer ([A-Za-z0-9._~-]+)$/.exec(header);
-  if (match === null) {
-    return null;
-  }
+  if (match === null) return null;
 
   const token = match[1];
   return parseAgentCredential(token) === null ? null : token;
@@ -106,10 +104,13 @@ export async function credentialVerifier(token: string): Promise<string> {
 export async function authenticateAgentCredential(
   token: string,
   record: AgentCredentialRecord,
+  nowSeconds = Math.floor(Date.now() / 1000),
 ): Promise<AgentAuthResult> {
   const parsed = parseAgentCredential(token);
-  if (parsed === null) {
-    return { ok: false, reason: "invalid_credential" };
+  if (parsed === null) return { ok: false, reason: "invalid_credential" };
+
+  if (!Number.isSafeInteger(nowSeconds) || nowSeconds < 0) {
+    return { ok: false, reason: "invalid_credential_record" };
   }
 
   if (
@@ -118,6 +119,8 @@ export async function authenticateAgentCredential(
     !isSha256Hex(record.verifier) ||
     (record.status !== "active" && record.status !== "revoked") ||
     (record.agentStatus !== "active" && record.agentStatus !== "disabled") ||
+    (record.expiresAt !== null &&
+      (!Number.isSafeInteger(record.expiresAt) || record.expiresAt < 0)) ||
     !Array.isArray(record.capabilities)
   ) {
     return { ok: false, reason: "invalid_credential_record" };
@@ -126,13 +129,14 @@ export async function authenticateAgentCredential(
   if (parsed.credentialId !== record.credentialId) {
     return { ok: false, reason: "credential_mismatch" };
   }
-
   if (record.agentStatus !== "active") {
     return { ok: false, reason: "disabled_agent" };
   }
-
   if (record.status !== "active") {
     return { ok: false, reason: "revoked_credential" };
+  }
+  if (record.expiresAt !== null && record.expiresAt <= nowSeconds) {
+    return { ok: false, reason: "expired_credential" };
   }
 
   const verifier = await credentialVerifier(token);
@@ -145,13 +149,15 @@ export async function authenticateAgentCredential(
     return { ok: false, reason: "invalid_capability_set" };
   }
 
-  const principal: AgentPrincipal = Object.freeze({
-    kind: "agent",
-    agentId: record.agentId,
-    credentialId: record.credentialId,
-    capabilities,
-  });
-  return { ok: true, principal };
+  return {
+    ok: true,
+    principal: Object.freeze({
+      kind: "agent",
+      agentId: record.agentId,
+      credentialId: record.credentialId,
+      capabilities,
+    }),
+  };
 }
 
 function secureRandomBytes(length: number): Uint8Array {
@@ -162,24 +168,18 @@ function secureRandomBytes(length: number): Uint8Array {
 
 function bytesToBase64Url(bytes: Uint8Array): string {
   let binary = "";
-  for (const byte of bytes) {
-    binary += String.fromCharCode(byte);
-  }
+  for (const byte of bytes) binary += String.fromCharCode(byte);
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/u, "");
 }
 
 function bytesToHex(bytes: Uint8Array): string {
   let output = "";
-  for (const byte of bytes) {
-    output += byte.toString(16).padStart(2, "0");
-  }
+  for (const byte of bytes) output += byte.toString(16).padStart(2, "0");
   return output;
 }
 
 function constantTimeAsciiEqual(left: string, right: string): boolean {
-  if (left.length !== right.length) {
-    return false;
-  }
+  if (left.length !== right.length) return false;
 
   let difference = 0;
   for (let index = 0; index < left.length; index += 1) {

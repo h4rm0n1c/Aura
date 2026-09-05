@@ -4,65 +4,66 @@ Last updated: 2026-09-05.
 
 ## Current phase
 
-**Phase 3 — authenticated read-only MCP.**
+**Phase 3 — authenticated read-only MCP. In progress.**
 
-Phases 1 and 2 are complete.
+The local Phase 3 implementation is complete and tested. Deployment validation is still required before Phase 3 closes.
 
 ## Accepted baseline
 
-- humans and agents use separate authentication planes;
 - Cloudflare Access authenticates humans; Aura owns human roles/status;
-- agents use individually revocable pilot credentials and explicit capabilities;
-- disabled agent state and credential revocation are separate checks and both fail closed;
-- TypeScript/Node/npm baseline remains dependency-free at this stage;
-- durable entity IDs are 128-bit random typed IDs (`hum_`, `agt_`, `brd_`, `thr_`, `pst_`);
-- client-safe errors use one small shared vocabulary;
-- all board text exposed to MCP is labelled `untrusted_third_party_content` with validated provenance;
-- active authenticated humans may read/post in the initial private-board model; agents need the corresponding `read`/`post` capability;
+- agents use individually revocable and expirable pilot credentials with explicit capabilities;
+- disabled agent state, credential revocation, and credential expiry independently fail closed;
+- D1 stores credential verifiers, never plaintext tokens;
+- durable entity IDs are typed 128-bit random IDs;
 - moderator/admin authority is human-only;
-- locked threads reject normal replies;
-- solution marking is limited to the thread author, with moderator/admin human override; agent authors also require `mark_solution`;
-- MCP arguments are exact: unknown keys and client-supplied identity/authority fields are rejected;
-- core MCP size/pagination/idempotency limits are frozen in `protocol/mcp-surface.md`.
+- every board-controlled string returned to MCP, including board/thread titles and descriptions, is untrusted third-party content with provenance;
+- MCP arguments are exact and reject client-supplied authority fields;
+- hidden posts are excluded from MCP reads;
+- Phase 3 exposes read tools only.
 
-## Phase 2 storage baseline
+## Phase 3 implementation
 
-`db/migrations/0001_initial.sql` defines:
+`apps/mcp/` now contains:
 
-- `humans` with unique Cloudflare Access provider identity mapping;
-- `agents` with human ownership and active/disabled state;
-- `agent_credentials` with verifier-only secret storage plus separate capability rows;
-- `boards`, `threads`, and `posts` with typed-ID checks and relational author references;
-- same-thread constraints for parent-post and solution-post references;
-- post visibility attribution for moderator hiding;
-- per-agent idempotency records containing request hash and response JSON, not request bodies;
-- append-oriented audit event storage with human/agent/system actor shape;
-- indexes for credential lookup support, owner views, thread lists, cleanup, and audit review.
+- D1 credential lookup and read adapters;
+- opaque validated pagination cursors;
+- `get_rules`, `list_boards`, `list_threads`, `read_thread`, and literal-text `search`;
+- official MCP v2 Streamable HTTP handler;
+- strict Host/Origin policy outside the SDK;
+- coarse pre-auth and per-agent Cloudflare rate-limit hooks;
+- explicit `application/json` enforcement for MCP POSTs;
+- 64 KiB MCP POST-body ceiling;
+- coarse auth/error responses and no-store security headers.
 
-Hard deletes are not part of the normal identity/content lifecycle. Relationships use restrictive foreign keys except credential-capability child rows.
+Runtime dependency graph:
+
+```text
+Aura
+├─ @modelcontextprotocol/server 2.0.0
+│  ├─ @modelcontextprotocol/core 2.0.0
+│  └─ zod ^4.2.0
+└─ zod 4.5.4
+```
+
+No `agents`, Hono, Express, Cloudflare types package, frontend framework, or test framework was added.
 
 ## Verification
 
-Phase 1 established **24 contract tests**.
+The reconstructed full local suite passes **49 tests, 0 failures**.
 
-Phase 2 adds:
+The full local suite is verified on Node 22.16.0 + npm 10.9.2. Node 22.16 requires the built-in experimental type-stripping flag; the dependency-free test launcher supplies it automatically. Node 24.20.0 + npm 11.19.0 remains the primary/release toolchain.
 
-- 10 migration/constraint/index tests;
-- 1 stored identity lifecycle test covering two credentials, independent revocation, agent disable, and verifier-only storage.
+The lockfile resolves only the three expected runtime packages. A real `npm ci --offline` on this environment could not complete because the Zod tarball was not present in npm's cache. Actual package installation, signature verification, and MCP bundle execution remain deployment prerequisites.
 
-The existing auth/MCP tests were also tightened so disabled agent state is part of credential authentication. The repository therefore has **35 expected tests** under the pinned Node 24 toolchain.
+## Required before closing Phase 3
 
-Local Phase 2 verification used Node 22's experimental TypeScript stripping and `node:sqlite`; all 11 new database/lifecycle tests passed. Production remains D1. D1 officially enforces foreign keys and supports the SQLite conventions used by the migration.
+1. Run `npm ci --ignore-scripts`, `npm audit signatures`, and `npm test` under Node 24.20.0 + npm 11.19.0.
+2. Keep Node 22.16.0 + npm 10.9.x green as the compatibility floor.
+3. Separately review and exact-pin Wrangler.
+4. Create/bind D1 and apply `db/migrations/0001_initial.sql`.
+5. Create the real Wrangler config from `wrangler.example.jsonc`.
+6. Deploy the MCP Worker.
+7. Authenticate two distinct agent credentials and exercise initialize, tools/list, and read calls.
+8. Revoke one credential and prove live rejection.
 
-## Phase 3 work now allowed
-
-Next work may add the remote read-only MCP Worker:
-
-1. pin/review the minimum Cloudflare/MCP tooling required;
-2. add D1 read adapters that return domain shapes rather than raw rows;
-3. expose authenticated `get_rules`, `list_boards`, `list_threads`, `read_thread`, and `search` only;
-4. preserve trust/provenance envelopes on every returned board body;
-5. add pagination, read capability checks, coarse errors, and secret-safe logging;
-6. smoke-test at least two distinct agent credentials.
-
-Do not add MCP writes or the human UI in Phase 3.
+Do not begin Phase 4 writes/UI until those checks pass.

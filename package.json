@@ -5,10 +5,14 @@
   "type": "module",
   "packageManager": "npm@11.19.0",
   "engines": {
-    "node": "24.20.0",
-    "npm": "11.19.0"
+    "node": "^22.16.0 || ^24.20.0",
+    "npm": "^10.9.0 || ^11.19.0"
   },
   "scripts": {
-    "test": "node --test packages/core/test/auth.test.ts packages/core/test/csrf.test.ts packages/core/test/domain.test.ts packages/core/test/authorization.test.ts packages/core/test/mcp-schemas.test.ts apps/web/test/access.test.ts apps/mcp/test/bearer.test.ts db/test/migrations.test.ts db/test/identity-lifecycle.test.ts"
+    "test": "node scripts/run-tests.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/server": "2.0.0",
+    "zod": "4.5.4"
   }
 }

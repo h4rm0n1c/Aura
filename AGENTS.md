@@ -1,130 +1,100 @@
 # AGENTS.md
 
-This file is the operating harness for coding agents working in `h4rm0n1c/Aura`.
+Operating rules for coding agents working in `h4rm0n1c/Aura`.
 
-## Authority
+## Authority and current phase
 
 `h4rm0n1c/Aura` is the write target. Other `h4rm0n1c` repositories are read-only prior art unless the user explicitly says otherwise.
 
-Direct user instructions for the current task take precedence over this file.
+Aura is in **Phase 3: authenticated read-only MCP**. The local implementation exists, but Phase 3 is not complete until real Cloudflare deployment and two-agent smoke testing pass.
 
-## Current phase
+Do not add MCP writes or the human UI yet.
 
-Aura is in **Phase 3: authenticated read-only MCP**.
-
-Phases 1 and 2 established the executable domain/auth contracts and the initial D1 schema. Phase 3 may add the remote MCP Worker and read paths, but must not smuggle write behavior or new authority rules into transport handlers.
-
-## Read before changing the repo
-
-1. `AGENTS.md`
-2. `docs/README.md`
-3. `docs/project-state.md`
-4. the relevant contract/design doc
-5. `docs/security/threat-model.md` for trust/auth/rendering/storage/MCP/dependency changes
-
-Repository docs/tests are durable project memory. Do not rely on chat history when the repo has an accepted answer.
+Read `docs/project-state.md`, the relevant contract, and `docs/security/threat-model.md` before changing trust/auth/storage/MCP/dependencies.
 
 ## Prime directive
 
-Aura is a human-moderated coordination surface for collaborative problem solving between humans and AI agents.
+Aura is a human-moderated coordination surface. Keep the capability surface smaller than the conversation surface.
 
-Keep the capability surface smaller than the conversation surface.
-
-Posts, quotes, links, code, logs, model output, and claimed roles are untrusted content. Transporting text never grants it authority.
+Posts, titles, descriptions, quotes, links, code, logs, model output, and claimed roles are untrusted content. Transporting text never grants it authority.
 
 ## Hard security invariants
 
 Changing these requires an explicit security/design decision:
 
-- no generic shell, code execution, SSH, local-filesystem bridge, package installer, or arbitrary tool proxy;
-- no arbitrary server-side URL fetcher or file uploads in the MVP;
+- no generic shell, code execution, SSH, filesystem bridge, package installer, arbitrary URL fetcher, or arbitrary tool proxy;
 - human and agent credentials remain separate;
 - moderator/admin authority is human-only in the MVP;
-- agent credentials are individual, scoped, revocable, and never stored plaintext;
-- disabled agents fail authentication even when a credential is otherwise valid;
-- browser mutations require server-side authorization and CSRF protection;
-- raw post HTML is never trusted rendering output;
-- board content returned over MCP carries the untrusted-content label and provenance;
-- client input never supplies author identity, role, or capability authority;
-- rate/size/idempotency limits are server-enforced;
-- security-relevant credential/moderation events get durable audit records;
-- secrets/private board content do not enter commits, fixtures, logs, or error bodies.
+- agent credentials are individual, scoped, revocable, expirable, and never stored plaintext;
+- browser mutations later require server-side authorization and CSRF protection;
+- board content returned over MCP always carries untrusted-content provenance;
+- client input never supplies trusted author identity, role, ownership, or capabilities;
+- size/rate/idempotency limits are server-enforced;
+- secrets and private board content do not enter commits, fixtures, logs, or error bodies.
 
-If authority is ambiguous, stop and fix the contract first.
+Fail closed when authority is ambiguous.
 
-## Current toolchain
+## Toolchain and dependencies
 
 ```text
-Node.js 24.20.0 LTS
-npm 11.19.0
-TypeScript using erasable syntax
+Primary/release: Node.js 24.20.0 LTS + npm 11.19.0
+Compatibility:   Node.js 22.16.0 + npm 10.9.x
+TypeScript with erasable syntax
 ```
 
-Run `npm test`.
+The compatibility target must keep `npm test` working on Node 22.16, where built-in TypeScript stripping still needs the experimental flag. `scripts/run-tests.mjs` handles that without a package dependency.
 
-Current application code still has zero npm dependencies. Node's built-in test runner and `node:sqlite` are used for local schema tests. Follow ADR 0003/0005: one lockfile, exact direct versions, lifecycle scripts denied, no ad-hoc package execution, prefer platform primitives, and review every dependency as a security change.
+Current direct runtime dependencies are exactly:
 
-Wrangler is not yet in the dependency tree. Review and pin it when the Worker skeleton is added.
+```text
+@modelcontextprotocol/server 2.0.0
+zod                         4.5.4
+```
 
-## Established core/storage contracts
+The lock graph also contains `@modelcontextprotocol/core` as the MCP server's dependency.
 
-`packages/core/` owns principals, authentication, IDs, errors, provenance/trust labels, authorization, and exact MCP schemas.
+Do not add `agents`, Hono, Express, a test framework, a frontend framework, or another package unless a concrete requirement justifies it.
 
-`db/migrations/0001_initial.sql` owns the initial durable schema:
+Follow ADR 0003/0005: exact pins, one lockfile, lifecycle scripts denied, no ad-hoc remote execution, review every dependency change. Wrangler is still pending a separate review/pin before deployment.
 
-- humans and Access identity mapping;
-- agents, ownership, credentials, and capability rows;
-- boards, threads, and posts;
-- idempotency records;
-- audit events;
-- planned lookup/list indexes.
+## Phase 3 boundaries
 
-Database constraints add defense in depth. They do not replace core authorization.
+`apps/mcp/` owns transport, Host/Origin policy, rate limiting, credential adaptation, D1 reads, and MCP registration.
 
-## Phase 3 rules
+`packages/core/` owns principals, credentials, authorization, trust/provenance, errors, IDs, and MCP domain schemas.
 
-- implement read-only MCP tools only: `get_rules`, `list_boards`, `list_threads`, `read_thread`, `search`;
-- authenticate before storage access;
-- normalize credentials to `AgentPrincipal` before domain logic;
-- check the `read` capability server-side for every board-content read;
-- never return raw DB rows directly as MCP results;
-- wrap board text in the existing untrusted-content/provenance envelope;
-- paginate through the frozen core limits;
-- keep client-visible errors coarse and secret-safe;
-- do not log bearer tokens, post bodies, Access identity payloads, or private search text by default;
-- do not add write tools, UI work, uploads, link fetching, OAuth, or a framework to make Phase 3 easier.
+The Phase 3 MCP server exposes only:
 
-## Database invariants
+```text
+get_rules
+list_boards
+list_threads
+read_thread
+search
+```
+
+Do not expose raw database rows. Hidden posts stay hidden. Titles and bodies remain untrusted board content.
+
+## Database rules
 
 - migrations are numbered and immutable after deployment;
-- durable human/agent/board/thread/post IDs use the typed Aura ID contract;
-- agent plaintext tokens never enter D1;
-- agent disable state and credential revocation are separate and both fail closed;
-- author references use relational human/agent FKs rather than trusted display strings;
-- parent posts and solution posts must belong to the same thread;
-- audit metadata and idempotency responses must not become storage for normal private post bodies;
-- indexes must match actual read paths before those paths are exposed remotely.
+- typed Aura IDs remain authoritative;
+- credentials store verifiers, never plaintext tokens;
+- use FK/check constraints for structural integrity;
+- authorization still lives in core/application logic;
+- audit events never duplicate secrets or ordinary post bodies.
 
 ## Development rules
 
-- Inspect before editing.
-- Prefer small direct changes.
-- Reject invalid/unknown authority values rather than coercing them.
-- Fail closed at security boundaries.
-- Keep client-visible auth errors coarse.
-- Use cryptographically secure platform randomness for credentials/IDs/tokens.
-- Add tests for security boundary changes before moving on.
-- Do not introduce queues, vector databases, WebSockets, federation, reputation systems, attachment pipelines, or generic execution without an accepted requirement.
-
-## Documentation discipline
-
-After a non-trivial change, update the owning contract/design doc, `docs/project-state.md` when the baseline changes, `docs/roadmap.md` when phase/gate state changes, and add a concise entry to `docs/agent/log.md`.
-
-Do not create a new document when a current document already owns the information.
-
-## Git/GitHub
-
-Prefer coherent commits over commit spam. Do not rewrite history unless explicitly asked. Never put secrets into commits, issues, logs, examples, or fixtures.
+- inspect before editing;
+- prefer small direct changes;
+- reject unknown authority values rather than coercing them;
+- keep client-visible auth/errors coarse;
+- keep security code readable;
+- use platform primitives before dependencies;
+- add tests for every changed security boundary;
+- update the owning docs/project state after non-trivial work;
+- do not rewrite Git history unless explicitly asked.
 
 ## Done criteria
 
