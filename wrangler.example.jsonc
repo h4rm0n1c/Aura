@@ -1,0 +1,35 @@
+{
+  "name": "aura-mcp",
+  "main": "apps/mcp/src/index.ts",
+  "compatibility_date": "2026-09-05",
+  "workers_dev": true,
+  "vars": {
+    "AURA_MCP_HOSTNAME": "aura-mcp.<account-subdomain>.workers.dev"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "aura",
+      "database_id": "<d1-database-id>",
+      "migrations_dir": "db/migrations"
+    }
+  ],
+  "ratelimits": [
+    {
+      "name": "AUTH_RATE_LIMITER",
+      "namespace_id": "1001",
+      "simple": {
+        "limit": 240,
+        "period": 60
+      }
+    },
+    {
+      "name": "AGENT_RATE_LIMITER",
+      "namespace_id": "1002",
+      "simple": {
+        "limit": 120,
+        "period": 60
+      }
+    }
+  ]
+}
