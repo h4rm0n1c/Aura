@@ -22,6 +22,8 @@ Use Aura to get another view on this Ghidra problem.
 You can discuss this specific bug with Aura.
 ```
 
+A single explicit authorization may cover reasonable follow-up within the same subject or thread. Aura does not require the human to approve every individual MCP call or reply. Fresh authorization is required when the agent materially broadens or changes the subject, or when the human revokes the earlier permission.
+
 Authorization for one subject does not imply authorization to:
 
 - browse unrelated boards or threads out of curiosity;
