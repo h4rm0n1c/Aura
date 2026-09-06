@@ -11,6 +11,7 @@ const BUNDLE_PATH = resolve(DIST_DIR, "aura-mcp.js");
 const MIGRATIONS_DIR = resolve(REPO_ROOT, "db/migrations");
 const API_BASE = "https://api.cloudflare.com/client/v4";
 const COMPATIBILITY_DATE = "2026-09-05";
+const PHASE4_MIGRATION = "0002_human_membership_and_board_staff.sql";
 const REQUIRED_TABLES = Object.freeze([
   "humans",
   "agents",
@@ -21,6 +22,19 @@ const REQUIRED_TABLES = Object.freeze([
   "posts",
   "idempotency_records",
   "audit_events",
+  "human_invites",
+  "board_staff",
+]);
+const PHASE4_SCHEMA_OBJECTS = Object.freeze([
+  ["table", "human_invites"],
+  ["table", "board_staff"],
+  ["index", "idx_human_invites_email_status"],
+  ["index", "idx_human_invites_expires"],
+  ["index", "idx_human_invites_pending_bootstrap"],
+  ["index", "idx_board_staff_human"],
+  ["trigger", "trg_human_invites_bootstrap_empty"],
+  ["trigger", "trg_humans_keep_last_active_admin_update"],
+  ["trigger", "trg_humans_keep_last_active_admin_delete"],
 ]);
 
 function fail(message) {
@@ -30,13 +44,17 @@ function fail(message) {
 function parseArgs(argv) {
   const args = new Set(argv);
   if (args.has("--help") || args.has("-h")) return { mode: "help" };
-  const plan = args.has("--plan");
-  const deploy = args.has("--deploy");
-  if (plan === deploy) fail("Choose exactly one mode: --plan or --deploy.");
+
+  const modes = [
+    ["--plan", "plan"],
+    ["--inspect", "inspect"],
+    ["--deploy", "deploy"],
+  ].filter(([flag]) => args.has(flag));
+  if (modes.length !== 1) fail("Choose exactly one mode: --plan, --inspect, or --deploy.");
   for (const arg of args) {
-    if (arg !== "--plan" && arg !== "--deploy") fail(`Unknown argument: ${arg}`);
+    if (arg !== "--plan" && arg !== "--inspect" && arg !== "--deploy") fail(`Unknown argument: ${arg}`);
   }
-  return { mode: plan ? "plan" : "deploy" };
+  return { mode: modes[0][1] };
 }
 
 function requireEnv(env, name) {
@@ -66,7 +84,9 @@ function loadConfig(env, mode) {
     fail("AURA_D1_NAME must be 1-64 letters, digits, underscores, or hyphens.");
   }
 
-  const apiToken = mode === "deploy" ? requireEnv(env, "CLOUDFLARE_API_TOKEN") : "";
+  const apiToken = mode === "deploy" || mode === "inspect"
+    ? requireEnv(env, "CLOUDFLARE_API_TOKEN")
+    : "";
   const hostname = `${workerName}.${workersDevSubdomain}`;
 
   return Object.freeze({
@@ -147,7 +167,7 @@ async function cfJson(config, path, method, body) {
   });
 }
 
-async function ensureD1(config) {
+async function findD1(config) {
   const params = new URLSearchParams({ name: config.d1Name, per_page: "10" });
   const listed = await cfRequest(
     config,
@@ -157,10 +177,14 @@ async function ensureD1(config) {
     (database) => database?.name === config.d1Name,
   );
   if (exact.length > 1) fail(`More than one D1 database is named ${config.d1Name}; refusing to guess.`);
-  if (exact.length === 1) {
-    if (typeof exact[0].uuid !== "string" || !exact[0].uuid) fail("Existing D1 database has no UUID.");
-    return { id: exact[0].uuid, created: false };
-  }
+  if (exact.length === 0) return null;
+  if (typeof exact[0].uuid !== "string" || !exact[0].uuid) fail("Existing D1 database has no UUID.");
+  return exact[0].uuid;
+}
+
+async function ensureD1(config) {
+  const existing = await findD1(config);
+  if (existing !== null) return { id: existing, created: false };
 
   const created = await cfJson(
     config,
@@ -185,8 +209,86 @@ async function queryD1(config, databaseId, sql, params = []) {
   return results;
 }
 
+function rowsFrom(results) {
+  const rows = [];
+  for (const result of results) {
+    if (Array.isArray(result?.results)) rows.push(...result.results);
+  }
+  return rows;
+}
+
 function sqlString(value) {
   return `'${String(value).replaceAll("'", "''")}'`;
+}
+
+async function readAppliedMigrations(config, databaseId) {
+  const schema = await queryD1(
+    config,
+    databaseId,
+    "SELECT name FROM sqlite_schema WHERE type='table' AND name='aura_schema_migrations';",
+  );
+  if (rowsFrom(schema).length === 0) return new Set();
+  const result = await queryD1(
+    config,
+    databaseId,
+    "SELECT name FROM aura_schema_migrations ORDER BY name;",
+  );
+  return new Set(rowsFrom(result).map((row) => row?.name).filter((name) => typeof name === "string"));
+}
+
+async function inspectPhase4MigrationState(config, databaseId) {
+  const applied = await readAppliedMigrations(config, databaseId);
+  const columnsResult = await queryD1(config, databaseId, "PRAGMA table_info(boards);");
+  const boardColumns = new Set(
+    rowsFrom(columnsResult).map((row) => row?.name).filter((name) => typeof name === "string"),
+  );
+
+  const wantedNames = PHASE4_SCHEMA_OBJECTS.map(([, name]) => sqlString(name)).join(", ");
+  const objectsResult = await queryD1(
+    config,
+    databaseId,
+    `SELECT type, name FROM sqlite_schema WHERE name IN (${wantedNames}) ORDER BY type, name;`,
+  );
+  const objects = new Set(
+    rowsFrom(objectsResult)
+      .filter((row) => typeof row?.type === "string" && typeof row?.name === "string")
+      .map((row) => `${row.type}:${row.name}`),
+  );
+
+  const checks = [
+    ["column:boards.status", boardColumns.has("status")],
+    ["column:boards.sort_order", boardColumns.has("sort_order")],
+    ...PHASE4_SCHEMA_OBJECTS.map(([type, name]) => [`${type}:${name}`, objects.has(`${type}:${name}`)]),
+  ];
+  const present = checks.filter(([, exists]) => exists).map(([name]) => name);
+  const missing = checks.filter(([, exists]) => !exists).map(([name]) => name);
+  const recorded = applied.has(PHASE4_MIGRATION);
+
+  let status;
+  if (recorded && missing.length === 0) status = "recorded-complete";
+  else if (recorded) status = "recorded-incomplete";
+  else if (present.length === 0) status = "not-applied";
+  else if (missing.length === 0) status = "complete-unrecorded";
+  else status = "partial";
+
+  return Object.freeze({ status, recorded, present, missing, applied: [...applied].sort() });
+}
+
+function printPhase4Inspection(config, databaseId, state) {
+  console.log("Aura D1 migration inspection");
+  console.log(`  D1 database:   ${config.d1Name} (${databaseId})`);
+  console.log(`  Applied:       ${state.applied.join(", ") || "none recorded"}`);
+  console.log(`  ${PHASE4_MIGRATION}: ${state.status}`);
+  if (state.present.length) console.log(`  Present:       ${state.present.join(", ")}`);
+  if (state.missing.length) console.log(`  Missing:       ${state.missing.join(", ")}`);
+
+  if (state.status === "not-applied") {
+    console.log("  Safe next step: retry the patched deployment.");
+  } else if (state.status === "recorded-complete") {
+    console.log("  Safe next step: no migration recovery is needed.");
+  } else {
+    console.log("  Safe next step: stop; do not rerun deployment until this state is repaired deliberately.");
+  }
 }
 
 async function applyMigrations(config, databaseId, migrationFiles) {
@@ -195,26 +297,26 @@ async function applyMigrations(config, databaseId, migrationFiles) {
     databaseId,
     "CREATE TABLE IF NOT EXISTS aura_schema_migrations (name TEXT PRIMARY KEY, applied_at INTEGER NOT NULL);",
   );
-  const appliedResult = await queryD1(
-    config,
-    databaseId,
-    "SELECT name FROM aura_schema_migrations ORDER BY name;",
-  );
-  const applied = new Set();
-  for (const result of appliedResult) {
-    for (const row of Array.isArray(result?.results) ? result.results : []) {
-      if (typeof row?.name === "string") applied.add(row.name);
-    }
-  }
+  const applied = await readAppliedMigrations(config, databaseId);
 
   const newlyApplied = [];
   for (const fileName of migrationFiles) {
     if (applied.has(fileName)) continue;
+    if (fileName === PHASE4_MIGRATION) {
+      const state = await inspectPhase4MigrationState(config, databaseId);
+      if (state.status !== "not-applied") {
+        printPhase4Inspection(config, databaseId, state);
+        fail(`Refusing to apply ${fileName} over ${state.status} schema state.`);
+      }
+    }
+
     const sql = await readFile(resolve(MIGRATIONS_DIR, fileName), "utf8");
     if (!sql.trim()) fail(`Migration ${fileName} is empty.`);
+    if (sql.includes("\r")) fail(`Migration ${fileName} contains CR characters; SQL migrations must use LF line endings.`);
     const batch = `${sql.trim()}\n\nINSERT INTO aura_schema_migrations(name, applied_at) VALUES (${sqlString(fileName)}, unixepoch());`;
     await queryD1(config, databaseId, batch);
     newlyApplied.push(fileName);
+    applied.add(fileName);
   }
   return newlyApplied;
 }
@@ -226,13 +328,16 @@ async function verifySchema(config, databaseId) {
     "SELECT name FROM sqlite_schema WHERE type = 'table' ORDER BY name;",
   );
   const names = new Set();
-  for (const part of result) {
-    for (const row of Array.isArray(part?.results) ? part.results : []) {
-      if (typeof row?.name === "string") names.add(row.name);
-    }
+  for (const row of rowsFrom(result)) {
+    if (typeof row?.name === "string") names.add(row.name);
   }
   const missing = REQUIRED_TABLES.filter((name) => !names.has(name));
   if (missing.length) fail(`D1 schema verification failed; missing tables: ${missing.join(", ")}`);
+
+  const phase4 = await inspectPhase4MigrationState(config, databaseId);
+  if (phase4.status !== "recorded-complete") {
+    fail(`D1 Phase 4 schema verification failed: ${phase4.status}.`);
+  }
 }
 
 function workerMetadata(config, databaseId) {
@@ -315,7 +420,7 @@ function printPlan(config, migrationFiles, bundleBytes) {
 }
 
 function printHelp() {
-  console.log(`Usage:\n  node deploy.mjs --plan\n  node deploy.mjs --deploy\n\nRequired for both:\n  CLOUDFLARE_ACCOUNT_ID\n  AURA_WORKERS_DEV_SUBDOMAIN\n\nRequired only for --deploy:\n  CLOUDFLARE_API_TOKEN\n\nOptional:\n  AURA_WORKER_NAME (default: aura-mcp)\n  AURA_D1_NAME     (default: aura)`);
+  console.log(`Usage:\n  node deploy.mjs --plan\n  node deploy.mjs --inspect\n  node deploy.mjs --deploy\n\nRequired for all modes:\n  CLOUDFLARE_ACCOUNT_ID\n  AURA_WORKERS_DEV_SUBDOMAIN\n\nRequired for --inspect and --deploy:\n  CLOUDFLARE_API_TOKEN\n\nOptional:\n  AURA_WORKER_NAME (default: aura-mcp)\n  AURA_D1_NAME     (default: aura)`);
 }
 
 async function main() {
@@ -325,6 +430,16 @@ async function main() {
     return;
   }
   const config = loadConfig(process.env, mode);
+
+  if (mode === "inspect") {
+    console.log(`Using Cloudflare account ${config.accountId}.`);
+    const databaseId = await findD1(config);
+    if (databaseId === null) fail(`No D1 database named ${config.d1Name} exists.`);
+    const state = await inspectPhase4MigrationState(config, databaseId);
+    printPhase4Inspection(config, databaseId, state);
+    return;
+  }
+
   const migrationFiles = await listMigrationFiles();
   if (!migrationFiles.length) fail("No numbered SQL migrations were found.");
   const bundleBytes = await bundleWorker();
