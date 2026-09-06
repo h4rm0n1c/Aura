@@ -4,7 +4,16 @@ import {
   issueCsrfToken,
   verifyCsrfToken,
 } from "../../../../packages/core/src/auth/csrf.ts";
-import { principalKey, type HumanPrincipal } from "../../../../packages/core/src/auth/principals.ts";
+import {
+  isHumanRole,
+  principalKey,
+  type HumanPrincipal,
+  type HumanRole,
+} from "../../../../packages/core/src/auth/principals.ts";
+import {
+  isBoardStaffRole,
+  type BoardStaffRole,
+} from "../../../../packages/core/src/domain/authorization.ts";
 import { MCP_LIMITS } from "../../../../packages/core/src/mcp/schemas.ts";
 import type { D1DatabaseLike } from "../db/d1.ts";
 import { escapeHtml, htmlPage, redirectResponse, textResponse } from "../ui.ts";
@@ -30,6 +39,14 @@ const THREAD_PATH = new RegExp(`^/t/(${THREAD_ID})$`);
 const THREAD_REPLY_PATH = new RegExp(`^/t/(${THREAD_ID})/reply$`);
 const THREAD_REPLY_TO_PATH = new RegExp(`^/t/(${THREAD_ID})/reply-to/(${POST_ID})$`);
 const MAX_FORM_BYTES = 48 * 1024;
+
+ type ForumHumanAuthority = "site-admin" | "site-moderator" | "board-manager" | "board-moderator";
+
+interface HumanAuthorityRow {
+  readonly human_id: unknown;
+  readonly site_role: unknown;
+  readonly board_role: unknown;
+}
 
 export async function handleForumRequest(
   request: Request,
@@ -97,7 +114,7 @@ async function boardIndexPage(db: D1DatabaseLike, principal: HumanPrincipal): Pr
     "Boards",
     `<div class="forum-heading"><div><h1>Boards</h1><p class="meta">Human and agent discussion in the same durable threads.</p></div><div class="forum-actions">${adminAction}</div></div>
 ${result.value.length === 0 ? empty : `<div class="table-wrap"><table class="board-index"><thead><tr><th>Board</th><th>Threads</th><th>Open</th><th>Last activity</th></tr></thead><tbody>${rows}</tbody></table></div>`}`,
-    { principal },
+    { principal, boards: result.value },
   );
 }
 
@@ -122,6 +139,7 @@ async function boardPage(
   const createPath = `/b/${board.slug}/threads`;
   const csrf = await issueForumCsrf(csrfKey, principal, createPath);
   const threadRows = threads.map(renderThreadRow).join("");
+  const boards = await loadBoardNavigation(db, principal);
   const adminAction = principal.role === "admin"
     ? `<a class="forum-action" href="/admin/boards/${escapeHtml(board.boardId)}">Board settings</a>`
     : "";
@@ -144,7 +162,7 @@ ${truncated ? `<p class="meta">Showing the 50 most recently active threads.</p>`
 <button type="submit">Create thread</button>
 </form>
 </div>`,
-    { principal },
+    { principal, boards, activeBoardSlug: board.slug },
   );
 }
 
@@ -175,8 +193,14 @@ async function threadPage(
     if (replyTarget === null) return forumErrorPage("not_found", principal, `/t/${threadId}`);
   }
 
+  const authorityByHumanId = await loadThreadHumanAuthorities(db, page.board.boardId, threadId);
+  if (authorityByHumanId === null) return forumErrorPage("internal_error", principal, `/b/${page.board.slug}`);
+  const boards = await loadBoardNavigation(db, principal);
   const sequenceById = new Map(page.posts.map((post) => [post.postId, post.sequence]));
-  const posts = page.posts.map((post) => renderPost(page, post, sequenceById)).join("\n");
+  const postIdBySequence = new Map(page.posts.map((post) => [post.sequence, post.postId]));
+  const posts = page.posts
+    .map((post) => renderPost(page, post, sequenceById, postIdBySequence, authorityByHumanId))
+    .join("\n");
   const replyHtml = page.thread.state === "locked"
     ? `<div class="box notice"><p>This thread is locked. New replies are disabled.</p></div>`
     : await replyComposer(csrfKey, principal, page, replyTarget);
@@ -190,7 +214,7 @@ async function threadPage(
 <section class="posts" aria-label="Thread posts">${posts || `<div class="box"><p>No visible posts.</p></div>`}</section>
 ${page.truncated ? `<p class="meta">Showing the first 200 visible posts. Pagination is not implemented yet.</p>` : ""}
 ${replyHtml}`,
-    { principal },
+    { principal, boards, activeBoardSlug: page.board.slug },
   );
 }
 
@@ -198,23 +222,26 @@ function renderPost(
   page: ForumThreadPage,
   post: ForumPost,
   sequenceById: ReadonlyMap<string, number>,
+  postIdBySequence: ReadonlyMap<number, string>,
+  authorityByHumanId: ReadonlyMap<string, ForumHumanAuthority>,
 ): string {
   const parentSequence = post.parentPostId === null ? null : sequenceById.get(post.parentPostId) ?? null;
   const parent = post.parentPostId === null
     ? ""
     : parentSequence === null
-      ? `<span class="meta">↳ parent <code>${escapeHtml(post.parentPostId)}</code></span>`
-      : `<a class="parent-link" href="#p-${escapeHtml(post.parentPostId)}">↳ #${parentSequence}</a>`;
+      ? `<span class="meta">parent <code>${escapeHtml(post.parentPostId)}</code></span>`
+      : `<a class="parent-link" href="#p-${escapeHtml(post.parentPostId)}">&gt;&gt;${parentSequence}</a>`;
   const confidence = post.confidence === null ? "" : ` · confidence ${escapeHtml(post.confidence)}`;
   const provenance = renderAuthorProvenance(post.author);
+  const capcode = renderStaffCapcode(post.author, authorityByHumanId);
   const replyLink = page.thread.state === "locked"
     ? ""
-    : `<a class="post-reply" href="/t/${escapeHtml(page.thread.threadId)}/reply-to/${escapeHtml(post.postId)}#reply">reply</a>`;
+    : `[<a class="post-reply" href="/t/${escapeHtml(page.thread.threadId)}/reply-to/${escapeHtml(post.postId)}#reply">Reply</a>]`;
 
   return `<article class="post post-${escapeHtml(post.author.kind)}" id="p-${escapeHtml(post.postId)}">
-<header class="post-head"><div class="post-meta"><a class="post-number" href="#p-${escapeHtml(post.postId)}" aria-label="Permanent link to post ${post.sequence}">#${post.sequence}</a><span class="author-kind">${post.author.kind.toUpperCase()}</span><strong class="post-author">${escapeHtml(post.author.displayName)}</strong><span class="post-secondary"><time datetime="${escapeHtml(isoTime(post.createdAt))}">${escapeHtml(formatTimestamp(post.createdAt))}</time>${confidence} ${parent}</span></div><div class="post-actions">${replyLink}</div></header>
+<header class="post-head"><div class="post-meta"><span class="author-kind">${post.author.kind.toUpperCase()}</span><strong class="post-author">${escapeHtml(post.author.displayName)}</strong>${capcode}<span class="post-secondary"><time datetime="${escapeHtml(isoTime(post.createdAt))}">${escapeHtml(formatTimestamp(post.createdAt))}</time>${confidence} ${parent}</span><a class="post-number" href="#p-${escapeHtml(post.postId)}" aria-label="Permanent link to post ${post.sequence}">No.${post.sequence}</a></div><div class="post-actions">${replyLink}</div></header>
 ${provenance}
-<div class="post-body">${escapeHtml(post.body)}</div>
+<div class="post-body">${renderPostBody(post.body, postIdBySequence)}</div>
 </article>`;
 }
 
@@ -228,7 +255,8 @@ async function replyComposer(
   const csrf = await issueForumCsrf(csrfKey, principal, path);
   const target = replyTarget === null
     ? ""
-    : `<div class="notice reply-target"><strong>Replying to #${replyTarget.sequence}</strong> — ${escapeHtml(replyTarget.author.displayName)} <a href="/t/${escapeHtml(page.thread.threadId)}#p-${escapeHtml(replyTarget.postId)}">view post</a> · <a href="/t/${escapeHtml(page.thread.threadId)}#reply">clear</a></div>`;
+    : `<div class="notice reply-target"><strong>Replying to &gt;&gt;${replyTarget.sequence}</strong> — ${escapeHtml(replyTarget.author.displayName)} <a href="/t/${escapeHtml(page.thread.threadId)}#p-${escapeHtml(replyTarget.postId)}">view post</a> · <a href="/t/${escapeHtml(page.thread.threadId)}#reply">clear</a></div>`;
+  const initialBody = replyTarget === null ? "" : `&gt;&gt;${replyTarget.sequence}\n`;
 
   return `<h2 id="reply">Reply</h2>
 <div class="box composer">
@@ -236,7 +264,7 @@ ${target}
 <form method="post" action="${escapeHtml(path)}">
 <input type="hidden" name="csrf" value="${escapeHtml(csrf)}">
 ${replyTarget === null ? "" : `<input type="hidden" name="parent_post_id" value="${escapeHtml(replyTarget.postId)}">`}
-<p><label for="reply-body">Post</label><textarea id="reply-body" name="body" rows="8" required></textarea></p>
+<p><label for="reply-body">Post</label><textarea id="reply-body" name="body" rows="8" required>${initialBody}</textarea></p>
 <p class="meta">Plain text · maximum ${MCP_LIMITS.postBytes.toLocaleString("en-US")} UTF-8 bytes.</p>
 <button type="submit">Post reply</button>
 </form>
@@ -295,6 +323,96 @@ function renderAuthorProvenance(author: ForumAuthor): string {
   const details = [author.model === null ? null : `model ${author.model}`, author.client === null ? null : `client ${author.client}`]
     .filter((value): value is string => value !== null);
   return details.length === 0 ? "" : `<div class="agent-provenance meta">${escapeHtml(details.join(" · "))}</div>`;
+}
+
+function renderStaffCapcode(
+  author: ForumAuthor,
+  authorityByHumanId: ReadonlyMap<string, ForumHumanAuthority>,
+): string {
+  if (author.kind !== "human" || author.humanId === null) return "";
+  const authority = authorityByHumanId.get(author.humanId);
+  if (authority === undefined) return "";
+  const label = authority === "site-admin"
+    ? "## Admin"
+    : authority === "site-moderator"
+      ? "## Mod"
+      : authority === "board-manager"
+        ? "## Board Manager"
+        : "## Board Mod";
+  return `<span class="staff-capcode capcode-${authority}">${label}</span>`;
+}
+
+function renderPostBody(body: string, postIdBySequence: ReadonlyMap<number, string>): string {
+  const pattern = />>([1-9][0-9]{0,8})/g;
+  let output = "";
+  let offset = 0;
+  for (const match of body.matchAll(pattern)) {
+    const index = match.index ?? 0;
+    output += escapeHtml(body.slice(offset, index));
+    const sequence = Number(match[1]);
+    const postId = postIdBySequence.get(sequence);
+    output += postId === undefined
+      ? escapeHtml(match[0])
+      : `<a class="post-ref" href="#p-${escapeHtml(postId)}">&gt;&gt;${sequence}</a>`;
+    offset = index + match[0].length;
+  }
+  return output + escapeHtml(body.slice(offset));
+}
+
+async function loadBoardNavigation(
+  db: D1DatabaseLike,
+  principal: HumanPrincipal,
+): Promise<readonly ForumBoardSummary[]> {
+  const result = await listForumBoards(db, principal);
+  return result.ok ? result.value : [];
+}
+
+async function loadThreadHumanAuthorities(
+  db: D1DatabaseLike,
+  boardId: string,
+  threadId: string,
+): Promise<ReadonlyMap<string, ForumHumanAuthority> | null> {
+  let rows: readonly HumanAuthorityRow[];
+  try {
+    const result = await db.prepare(`
+      SELECT DISTINCT
+        p.author_human_id AS human_id,
+        h.role AS site_role,
+        bs.role AS board_role
+      FROM posts p
+      JOIN humans h ON h.id = p.author_human_id
+      LEFT JOIN board_staff bs ON bs.board_id = ?1 AND bs.human_id = p.author_human_id
+      WHERE p.thread_id = ?2 AND p.author_kind = 'human'
+    `).bind(boardId, threadId).all<HumanAuthorityRow>();
+    rows = result.results ?? [];
+  } catch {
+    return null;
+  }
+
+  const authorities = new Map<string, ForumHumanAuthority>();
+  for (const row of rows) {
+    if (typeof row.human_id !== "string" || !isHumanRole(row.site_role)) return null;
+    const boardRole = row.board_role === null
+      ? null
+      : isBoardStaffRole(row.board_role)
+        ? row.board_role
+        : undefined;
+    if (boardRole === undefined) return null;
+    const authority = resolveHumanAuthority(row.site_role, boardRole);
+    if (authority !== null) authorities.set(row.human_id, authority);
+  }
+  return authorities;
+}
+
+function resolveHumanAuthority(
+  siteRole: HumanRole,
+  boardRole: BoardStaffRole | null,
+): ForumHumanAuthority | null {
+  if (siteRole === "admin") return "site-admin";
+  if (siteRole === "moderator") return "site-moderator";
+  if (boardRole === "manager") return "board-manager";
+  if (boardRole === "moderator") return "board-moderator";
+  return null;
 }
 
 async function issueForumCsrf(csrfKey: Uint8Array, principal: HumanPrincipal, pathname: string): Promise<string> {
