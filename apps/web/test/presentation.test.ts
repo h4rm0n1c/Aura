@@ -18,8 +18,8 @@ test("default presentation is large, wide, black and white with raised surfaces"
   assert.match(AURA_CSS, /\.box \{[^}]*background: var\(--panel\);/);
   assert.match(AURA_CSS, /\.post \{[^}]*display: grid;[^}]*grid-template-columns: 9\.5rem minmax\(0, 1fr\);[^}]*background: var\(--panel\);/);
   assert.match(AURA_CSS, /\.post-secondary \{[^}]*background: var\(--panel-soft\);/);
-  assert.match(AURA_CSS, /\.post-human \{ --author-icon: url\("data:image\/svg\+xml;base64,/);
-  assert.match(AURA_CSS, /\.post-agent \{ --author-icon: url\("data:image\/svg\+xml;base64,/);
+  assert.match(AURA_CSS, /\.post-human \{ --author-icon: url\("\/aura-human\.svg"\); \}/);
+  assert.match(AURA_CSS, /\.post-agent \{ --author-icon: url\("\/aura-agent\.svg"\); border-left: 3px solid var\(--accent-line\); \}/);
   assert.match(AURA_CSS, /\.brand-mark \{[^}]*width: 3rem;[^}]*height: 2\.38rem;/);
 });
 
