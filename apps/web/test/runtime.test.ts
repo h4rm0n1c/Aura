@@ -109,7 +109,33 @@ test("admin route is server-authorized and ordinary members are denied", async (
   assert.equal(admin.status, 200);
   const html = await admin.text();
   assert.match(html, /Administration/);
-  assert.match(html, /Invitations/);
+  assert.match(html, /href="\/admin\/invites"/);
+  assert.match(html, /href="\/admin\/users"/);
+});
+
+test("admin invitation and user pages route through authenticated runtime", async () => {
+  const invites = await handleAuraWebRequest(
+    new Request("https://aura.example/admin/invites"),
+    env("admin"),
+    { access },
+  );
+  assert.equal(invites.status, 200);
+  assert.match(await invites.text(), /Create member invitation/);
+
+  const users = await handleAuraWebRequest(
+    new Request("https://aura.example/admin/users"),
+    env("admin"),
+    { access },
+  );
+  assert.equal(users.status, 200);
+  assert.match(await users.text(), /Disabling a human immediately/);
+
+  const denied = await handleAuraWebRequest(
+    new Request("https://aura.example/admin/users"),
+    env("member"),
+    { access },
+  );
+  assert.equal(denied.status, 403);
 });
 
 test("authenticated humans get an owner-scoped agent provisioning surface", async () => {
