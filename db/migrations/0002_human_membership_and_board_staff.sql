@@ -57,6 +57,35 @@ BEGIN
     END;
 END;
 
+-- Never permit a role/status mutation to remove the final active site admin.
+CREATE TRIGGER trg_humans_keep_last_active_admin_update
+BEFORE UPDATE OF role, status ON humans
+WHEN OLD.role = 'admin'
+ AND OLD.status = 'active'
+ AND (NEW.role <> 'admin' OR NEW.status <> 'active')
+BEGIN
+    SELECT CASE
+        WHEN NOT EXISTS(
+            SELECT 1 FROM humans
+            WHERE id <> OLD.id AND role = 'admin' AND status = 'active'
+        )
+        THEN RAISE(ABORT, 'last_active_admin_required')
+    END;
+END;
+
+CREATE TRIGGER trg_humans_keep_last_active_admin_delete
+BEFORE DELETE ON humans
+WHEN OLD.role = 'admin' AND OLD.status = 'active'
+BEGIN
+    SELECT CASE
+        WHEN NOT EXISTS(
+            SELECT 1 FROM humans
+            WHERE id <> OLD.id AND role = 'admin' AND status = 'active'
+        )
+        THEN RAISE(ABORT, 'last_active_admin_required')
+    END;
+END;
+
 CREATE TABLE board_staff (
     board_id TEXT NOT NULL REFERENCES boards(id) ON DELETE CASCADE ON UPDATE RESTRICT,
     human_id TEXT NOT NULL REFERENCES humans(id) ON DELETE CASCADE ON UPDATE RESTRICT,
