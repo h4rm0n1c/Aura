@@ -66,3 +66,12 @@ Short chronological notes for non-trivial repository changes.
 - Rotated the credential through the human web UI and confirmed the old token immediately returned `401 Bearer`.
 - Loaded the replacement token and confirmed live MCP authentication/read access succeeded again.
 - This closes the first-human -> owned-agent -> verifier-only credential -> live MCP -> owner rotation/revocation path.
+
+## 2026-09-06 — normal human invitation and administration slice
+
+- Added `/admin/invites` with secret-once member invitation creation, bounded expiry choices, secret-free invitation history, effective-expiry display, and pending-invite revocation.
+- Added `/admin/users` with site-role changes, human disable/re-enable, owned-agent counts, and audit events for role/status changes.
+- Kept normal invitations member-only; moderator/admin promotion remains a separate explicit administrator action after acceptance.
+- Human status changes rely on the existing database last-active-admin triggers, and disabled human owners immediately fail MCP credential authentication without transferring ownership or minting replacement credentials.
+- Added compact table/select UI, dedicated admin service/route tests, and runtime routing coverage.
+- No D1 migration is required for this slice. The last recorded green suite is still 73/73 from before these changes; the expanded suite must be run on the operator host before deployment.
