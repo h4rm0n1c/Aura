@@ -131,7 +131,7 @@ async function inviteGet(
     `<h1>Accept Aura invitation</h1>
 <div class="box notice"><p>Signed in as <strong>${escapeHtml(verified.identity.email)}</strong>.</p></div>
 <div class="box">
-<p>Accepting this invitation creates your Aura account. The invitation is bound to the authenticated email address and can be used only once.</p>
+<p>Accepting creates your Aura account and consumes this one-time invitation. DM-link invitations are claimed by the first authenticated identity to accept them; email-bound invitations additionally require the signed-in email to match.</p>
 <p>Please read the <a href="/rules">Aura rules</a> before continuing.</p>
 <form method="post" action="${escapeHtml(pathname)}">
 <input type="hidden" name="csrf" value="${escapeHtml(csrf)}">
@@ -179,7 +179,7 @@ async function invitePost(
     const status = accepted.error.code === "not_found" ? 404 : accepted.error.code === "conflict" ? 409 : 500;
     return htmlPage(
       "Invitation unavailable",
-      `<h1>Invitation unavailable</h1><div class="box error"><p>This invitation is invalid, expired, already used, or does not match the signed-in email address.</p></div>`,
+      `<h1>Invitation unavailable</h1><div class="box error"><p>This invitation is invalid, expired, already used, or cannot be used by the signed-in identity.</p></div>`,
       { status },
     );
   }
