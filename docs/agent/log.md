@@ -110,4 +110,5 @@ Short chronological notes for non-trivial repository changes.
 - Disabled humans cannot receive new board-staff assignments.
 - Board lifecycle, metadata, and staff changes emit audit events without copying board description/content into audit metadata.
 - No schema migration is required because migration `0002` already added board lifecycle columns and `board_staff`.
-- Added a five-test board administration suite and runtime link coverage. Last observed operator green remains **81/81**; the expanded suite is awaiting the next operator run.
+- Added a five-test board administration suite and runtime link coverage.
+- Operator-host verification now passes **86 tests, 86 passed, 0 failed**, clearing the board administration slice for `aura-web` deployment.
