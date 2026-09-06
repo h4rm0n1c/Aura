@@ -144,11 +144,29 @@ td form.inline { display: inline-flex; gap: .4rem; align-items: center; margin: 
 .post-number { font-weight: 600; text-decoration: none; }
 .post-number:hover { text-decoration: underline; }
 .post-actions { flex: none; font-size: .88rem; }
-.post-reply { font-weight: 600; text-decoration: none; }
-.post-reply:hover { text-decoration: underline; }
+.post-reply, .post-edit { font-weight: 600; text-decoration: none; }
+.post-reply:hover, .post-edit:hover { text-decoration: underline; }
 .parent-link, .post-ref { font-weight: 600; text-decoration: none; }
 .parent-link:hover, .post-ref:hover { text-decoration: underline; }
-.post-body { flex: 1; min-height: 7rem; padding: .88rem .95rem 1.05rem; white-space: pre-wrap; overflow-wrap: anywhere; tab-size: 4; font-size: 1rem; line-height: 1.55; }
+.post-body { flex: 1; min-height: 7rem; padding: .88rem .95rem 1.05rem; overflow-wrap: anywhere; tab-size: 4; font-size: 1rem; line-height: 1.55; }
+.markdown-body > :first-child { margin-top: 0; }
+.markdown-body > :last-child { margin-bottom: 0; }
+.markdown-body p { margin: 0 0 .72rem; }
+.markdown-body h3, .markdown-body h4, .markdown-body h5, .markdown-body h6 { margin: .85rem 0 .42rem; line-height: 1.25; }
+.markdown-body h3 { font-size: 1.18rem; }
+.markdown-body h4 { font-size: 1.08rem; }
+.markdown-body h5, .markdown-body h6 { font-size: 1rem; }
+.markdown-body ul, .markdown-body ol { margin: .42rem 0 .72rem 1.45rem; padding: 0; }
+.markdown-body li { margin: .12rem 0; }
+.markdown-body blockquote { margin: .55rem 0 .72rem; padding: .45rem .65rem; border-left: 3px solid var(--accent-line); background: #101010; color: #e6e6e6; }
+.markdown-body blockquote > :last-child { margin-bottom: 0; }
+.markdown-body pre { margin: .58rem 0 .78rem; padding: .68rem .75rem; overflow: auto; border: 1px solid var(--line); background: #080808; white-space: pre; line-height: 1.42; font-size: .91rem; tab-size: 4; }
+.markdown-body :not(pre) > code { padding: .05rem .24rem; border: 1px solid #444; background: #090909; font-size: .92em; }
+.markdown-body pre code { padding: 0; border: 0; background: transparent; font-size: inherit; }
+.markdown-body hr { border: 0; border-top: 1px solid var(--line-strong); margin: .9rem 0; }
+.markdown-preview { border: 1px solid var(--line-strong); background: #0d0d0d; margin: 0 0 .72rem; }
+.preview-label { padding: .26rem .52rem; border-bottom: 1px solid var(--line); background: var(--panel-soft); color: var(--muted); font-size: .84rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
+.markdown-preview .markdown-body { padding: .72rem .78rem .8rem; }
 .composer { position: relative; width: 100%; min-height: 12rem; border: 1px solid var(--line-strong); border-top: 2px solid var(--accent-line); padding: .75rem .8rem .85rem 12.3rem; overflow: hidden; }
 .composer::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 11.5rem; background: #111; border-right: 1px solid var(--line); }
 .composer > .reply-target, .composer > form { position: relative; z-index: 1; }
@@ -157,7 +175,12 @@ td form.inline { display: inline-flex; gap: .4rem; align-items: center; margin: 
 .composer input[type="text"], .composer textarea { width: 100%; max-width: none; }
 .composer textarea { min-height: 10rem; resize: vertical; line-height: 1.5; }
 .composer .meta { margin: .05rem 0; }
-.composer button[type="submit"] { justify-self: start; margin-top: .12rem; border-color: var(--action-bg); background: var(--action-bg); color: var(--action-text); font-weight: 600; }
+.composer-actions { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
+.composer-actions button[type="submit"] { margin-top: .12rem; }
+.composer-actions button[type="submit"]:last-child { border-color: var(--action-bg); background: var(--action-bg); color: var(--action-text); font-weight: 600; }
+.markdown-help { color: var(--muted); font-size: .9rem; }
+.markdown-help summary { width: max-content; cursor: pointer; color: var(--link); }
+.markdown-help div { margin-top: .35rem; line-height: 1.55; }
 .reply-target { border: 1px solid var(--accent-line); background: var(--panel); padding: .48rem .58rem; margin: 0 0 .65rem; font-size: .98rem; }
 body > footer { max-width: var(--shell-width); margin: 1rem auto; padding: 0 .8rem 1rem; color: var(--muted); font-size: .95rem; }
 @media (max-width: 760px) {
