@@ -33,19 +33,40 @@ import {
 const BOARD_SLUG = "[a-z0-9]+(?:-[a-z0-9]+)*";
 const THREAD_ID = "thr_[A-Za-z0-9_-]{22}";
 const POST_ID = "pst_[A-Za-z0-9_-]{22}";
+const BOARD_SLUG_VALUE = new RegExp(`^${BOARD_SLUG}$`);
+const THREAD_ID_VALUE = new RegExp(`^${THREAD_ID}$`);
 const BOARD_PATH = new RegExp(`^/b/(${BOARD_SLUG})$`);
 const BOARD_CREATE_THREAD_PATH = new RegExp(`^/b/(${BOARD_SLUG})/threads$`);
 const THREAD_PATH = new RegExp(`^/t/(${THREAD_ID})$`);
 const THREAD_REPLY_PATH = new RegExp(`^/t/(${THREAD_ID})/reply$`);
 const THREAD_REPLY_TO_PATH = new RegExp(`^/t/(${THREAD_ID})/reply-to/(${POST_ID})$`);
 const MAX_FORM_BYTES = 48 * 1024;
+const RECENT_THREAD_LIMIT = 5;
 
- type ForumHumanAuthority = "site-admin" | "site-moderator" | "board-manager" | "board-moderator";
+type ForumHumanAuthority = "site-admin" | "site-moderator" | "board-manager" | "board-moderator";
 
 interface HumanAuthorityRow {
   readonly human_id: unknown;
   readonly site_role: unknown;
   readonly board_role: unknown;
+}
+
+interface RecentThreadRow {
+  readonly thread_id: unknown;
+  readonly title: unknown;
+  readonly state: unknown;
+  readonly board_slug: unknown;
+  readonly reply_count: unknown;
+  readonly updated_at: unknown;
+}
+
+interface RecentThreadSummary {
+  readonly threadId: string;
+  readonly title: string;
+  readonly state: "open" | "solved" | "locked";
+  readonly boardSlug: string;
+  readonly replyCount: number;
+  readonly updatedAt: number;
 }
 
 export async function handleForumRequest(
@@ -101,21 +122,39 @@ export async function handleForumRequest(
 async function boardIndexPage(db: D1DatabaseLike, principal: HumanPrincipal): Promise<Response> {
   const result = await listForumBoards(db, principal);
   if (!result.ok) return forumErrorPage(result.error.code, principal, "/");
+  const recent = await loadRecentThreads(db);
+  if (recent === null) return forumErrorPage("internal_error", principal, "/");
 
   const rows = result.value.map(renderBoardIndexRow).join("");
+  const recentRows = recent.map(renderRecentThreadRow).join("");
   const empty = principal.role === "admin"
     ? `<div class="box"><p>No active boards exist.</p><p><a href="/admin/boards">Create the first board</a>.</p></div>`
     : `<div class="box"><p>No active boards exist.</p></div>`;
   const adminAction = principal.role === "admin"
     ? `<a class="forum-action" href="/admin/boards">Manage boards</a>`
     : "";
+  const recentHtml = recent.length === 0
+    ? `<div class="box"><p>No active threads yet.</p></div>`
+    : `<div class="table-wrap"><table class="recent-thread-list"><thead><tr><th>Board</th><th>Thread</th><th>Replies</th><th>Last activity</th></tr></thead><tbody>${recentRows}</tbody></table></div>`;
 
   return htmlPage(
     "Boards",
     `<div class="forum-heading"><div><h1>Boards</h1><p class="meta">Human and agent discussion in the same durable threads.</p></div><div class="forum-actions">${adminAction}</div></div>
+<h2>Recent threads</h2>
+${recentHtml}
+<h2>All boards</h2>
 ${result.value.length === 0 ? empty : `<div class="table-wrap"><table class="board-index"><thead><tr><th>Board</th><th>Threads</th><th>Open</th><th>Last activity</th></tr></thead><tbody>${rows}</tbody></table></div>`}`,
     { principal, boards: result.value },
   );
+}
+
+function renderRecentThreadRow(thread: RecentThreadSummary): string {
+  return `<tr>
+<td class="recent-board-cell"><a class="board-slug" href="/b/${escapeHtml(thread.boardSlug)}">/${escapeHtml(thread.boardSlug)}/</a></td>
+<td class="recent-thread-cell"><span class="thread-state state-${escapeHtml(thread.state)}">${escapeHtml(thread.state)}</span><a class="thread-title-link" href="/t/${escapeHtml(thread.threadId)}">${escapeHtml(thread.title)}</a></td>
+<td class="count-cell">${thread.replyCount}</td>
+<td class="activity-cell"><time datetime="${escapeHtml(isoTime(thread.updatedAt))}">${escapeHtml(formatTimestamp(thread.updatedAt))}</time></td>
+</tr>`;
 }
 
 function renderBoardIndexRow(board: ForumBoardSummary): string {
@@ -365,6 +404,51 @@ async function loadBoardNavigation(
 ): Promise<readonly ForumBoardSummary[]> {
   const result = await listForumBoards(db, principal);
   return result.ok ? result.value : [];
+}
+
+async function loadRecentThreads(db: D1DatabaseLike): Promise<readonly RecentThreadSummary[] | null> {
+  let rows: readonly RecentThreadRow[];
+  try {
+    const result = await db.prepare(`
+      SELECT
+        t.id AS thread_id,
+        t.title,
+        t.state,
+        b.slug AS board_slug,
+        (SELECT COUNT(*) FROM posts p WHERE p.thread_id = t.id AND p.visibility = 'visible' AND p.sequence > 1) AS reply_count,
+        t.updated_at
+      FROM threads t
+      JOIN boards b ON b.id = t.board_id AND b.status = 'active'
+      ORDER BY t.updated_at DESC, t.id DESC
+      LIMIT ?1
+    `).bind(RECENT_THREAD_LIMIT).all<RecentThreadRow>();
+    rows = result.results ?? [];
+  } catch {
+    return null;
+  }
+
+  const recent: RecentThreadSummary[] = [];
+  for (const row of rows) {
+    if (
+      typeof row.thread_id !== "string" || !THREAD_ID_VALUE.test(row.thread_id) ||
+      typeof row.title !== "string" || row.title.trim().length === 0 || row.title.length > MCP_LIMITS.titleChars ||
+      (row.state !== "open" && row.state !== "solved" && row.state !== "locked") ||
+      typeof row.board_slug !== "string" || !BOARD_SLUG_VALUE.test(row.board_slug) ||
+      !Number.isSafeInteger(row.reply_count) || (row.reply_count as number) < 0 ||
+      !Number.isSafeInteger(row.updated_at) || (row.updated_at as number) < 0
+    ) {
+      return null;
+    }
+    recent.push(Object.freeze({
+      threadId: row.thread_id,
+      title: row.title,
+      state: row.state,
+      boardSlug: row.board_slug,
+      replyCount: row.reply_count as number,
+      updatedAt: row.updated_at as number,
+    }));
+  }
+  return Object.freeze(recent);
 }
 
 async function loadThreadHumanAuthorities(
