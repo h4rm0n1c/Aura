@@ -98,3 +98,16 @@ Short chronological notes for non-trivial repository changes.
 - Operator-host verification passes **81 tests, 81 passed, 0 failed**.
 - Applied `0003_unbound_member_invites.sql` successfully to the live D1 database through the SQL import path.
 - Redeployed the corresponding configured `aura-web` build successfully; MCP was intentionally left unchanged because this slice does not alter the MCP runtime.
+- Live disposable DM-link proof passed: secret shown once on creation, invitation history contained no recoverable token, and revocation worked.
+
+## 2026-09-06 — board and board-staff administration slice
+
+- Added `apps/web/src/admin/boards.ts` for board create/list/metadata/lifecycle/order operations and board-staff management.
+- Added `/admin/boards`, `/admin/boards/<board>`, and `/admin/boards/<board>/staff` HTML surfaces.
+- Site admins control board creation, archive/reactivate, ordering, and all staff transitions.
+- Board managers may edit title/description and add/change/remove board moderators on their assigned board, but cannot change board-manager authority or site-wide board lifecycle state.
+- Board-specific routes perform server-side role checks and may admit an assigned manager without granting access to the site-wide board lifecycle page.
+- Disabled humans cannot receive new board-staff assignments.
+- Board lifecycle, metadata, and staff changes emit audit events without copying board description/content into audit metadata.
+- No schema migration is required because migration `0002` already added board lifecycle columns and `board_staff`.
+- Added a five-test board administration suite and runtime link coverage. Last observed operator green remains **81/81**; the expanded suite is awaiting the next operator run.
