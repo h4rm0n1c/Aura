@@ -181,9 +181,9 @@ test("forum board index exposes active boards with useful thread counts and late
   assert.doesNotMatch(indexHtml, /First thread/);
   assert.ok(indexHtml.indexOf("Recent threads") < indexHtml.indexOf("All boards"));
   assert.match(indexHtml, />6\/100<\/td>/);
-  assert.match(AURA_CSS, /--shell-width: 1240px/);
+  assert.match(AURA_CSS, /--shell-width: 80vw/);
   assert.match(AURA_CSS, /font-family: Arial, Helvetica, sans-serif/);
-  assert.match(AURA_CSS, /body \{[^}]*font-size: 14px;[^}]*line-height: 1\.38;/);
+  assert.match(AURA_CSS, /html \{ font-size: 150%; \}/);
   assert.match(AURA_CSS, /\.board-strip-track \{ width: max-content; white-space: nowrap; text-align: left; \}/);
   db.close();
 });
