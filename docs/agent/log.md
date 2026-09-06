@@ -104,3 +104,27 @@ Short chronological notes for non-trivial repository changes.
 - Added read-only `npm run inspect` plus deployment refusal on partial/ambiguous `0002` schema state.
 - Live inspection confirmed D1 remains cleanly at `0001_initial.sql`: no `0002` marker, columns, tables, indexes, or triggers exist.
 - Patched redeployment is therefore safe without manual cleanup.
+
+## 2026-09-06 — D1 import transport and live membership schema
+
+- Replaced trigger-bearing migration transport over D1 `/query` with Cloudflare's SQL import API: init, signed upload, ingest, poll, and migration-marker verification.
+- Applied `0002_human_membership_and_board_staff.sql` successfully to the real `aura` D1 database with no manual repair.
+- Re-verified the full D1 schema and re-uploaded `aura-mcp`; unauthenticated MCP still failed closed with `401 Bearer`.
+
+## 2026-09-06 — live human web bootstrap
+
+- Added the dependency-free `aura-web` Worker with server-rendered `/`, `/rules`, `/invite/<token>`, `/account`, `/admin`, and local CSS.
+- Deployed the Worker first in setup-incomplete mode, attached Cloudflare Access for all traffic, then configured the Access AUD and Worker-secret CSRF key.
+- Created and accepted the one-time email-bound bootstrap-admin invitation through the live Access-authenticated web flow.
+- Confirmed the resulting human account is active with site role `admin` and can open `/admin`.
+- Fixed the browser `Origin: null` edge case caused by `Referrer-Policy: no-referrer` by requiring `Sec-Fetch-Site: same-origin` when Origin is absent/null; HMAC CSRF remains mandatory.
+
+## 2026-09-06 — human-owned agent identity baseline
+
+- Accepted ADR 0008: every Aura agent belongs to exactly one human owner; agents do not self-register and human site/board roles do not flow into agent capability.
+- Split owner-only agent provisioning from owner/admin operational control in core authorization.
+- Extended the MCP credential record/principal with `ownerHumanId`; D1 credential lookup now joins the owning human and authentication rejects disabled owners.
+- Added `/agents` and account navigation for owner-scoped agent creation, one-time credential display, rotation, revocation, and agent disable/re-enable.
+- Initial human-created credentials deliberately receive only the existing `read` capability; write capabilities remain gated on the future write-capable MCP slice.
+- Added SQLite-backed agent lifecycle tests, inactive-owner MCP tests, and a runtime test for the authenticated `/agents` surface.
+- These latest agent changes still require an operator-host `npm test` pass and live redeployment before they are considered verified.
