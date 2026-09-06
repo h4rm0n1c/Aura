@@ -9,6 +9,7 @@ interface HumanRow {
   readonly id: unknown;
   readonly identity_provider: unknown;
   readonly provider_id: unknown;
+  readonly display_name: unknown;
   readonly role: unknown;
   readonly status: unknown;
 }
@@ -18,7 +19,7 @@ export async function lookupHumanAuthRecord(
   providerId: string,
 ): Promise<HumanAuthRecord | null> {
   const row = await db.prepare(`
-    SELECT id, identity_provider, provider_id, role, status
+    SELECT id, identity_provider, provider_id, display_name, role, status
     FROM humans
     WHERE identity_provider = 'cloudflare_access' AND provider_id = ?1
     LIMIT 1
@@ -27,8 +28,9 @@ export async function lookupHumanAuthRecord(
   if (row === null) return null;
   return {
     humanId: typeof row.id === "string" ? row.id : "",
-    provider: row.identity_provider === "cloudflare_access" ? "cloudflare_access" : "cloudflare_access",
+    provider: "cloudflare_access",
     providerId: typeof row.provider_id === "string" ? row.provider_id : "",
+    displayName: row.display_name === null || typeof row.display_name === "string" ? row.display_name : null,
     role: row.role as HumanAuthRecord["role"],
     status: row.status as HumanAuthRecord["status"],
   };
