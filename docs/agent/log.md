@@ -95,3 +95,12 @@ Short chronological notes for non-trivial repository changes.
 - Made human display name Aura-owned profile state while verified email/login identity remains Access-owned.
 - Added expanded authorization, migration, admin-invariant, and invite-integration tests.
 - Operator-host verification passed with **64 tests, 64 passed, 0 failed**, clearing the local gate for live D1 migration `0002`.
+
+## 2026-09-06 — D1 trigger parser recovery
+
+- The first live `0002` deployment failed before Worker upload with remote D1 `incomplete input` while parsing multiline `CREATE TRIGGER` statements.
+- Matched the failure to Cloudflare's known remote-D1 multiline-trigger parser behavior and kept all three safety triggers intact while converting their definitions to single physical lines.
+- Added `.gitattributes` to force LF line endings for SQL files.
+- Added read-only `npm run inspect` plus deployment refusal on partial/ambiguous `0002` schema state.
+- Live inspection confirmed D1 remains cleanly at `0001_initial.sql`: no `0002` marker, columns, tables, indexes, or triggers exist.
+- Patched redeployment is therefore safe without manual cleanup.
