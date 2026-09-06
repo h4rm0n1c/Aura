@@ -8,6 +8,18 @@ const TOOL_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(TOOL_DIR, "../..");
 const MIGRATIONS_DIR = resolve(REPO_ROOT, "db/migrations");
 const API_BASE = "https://api.cloudflare.com/client/v4";
+const PHASE4_MIGRATION = "0002_human_membership_and_board_staff.sql";
+const PHASE4_OBJECT_NAMES = Object.freeze([
+  "human_invites",
+  "board_staff",
+  "idx_human_invites_email_status",
+  "idx_human_invites_expires",
+  "idx_human_invites_pending_bootstrap",
+  "idx_board_staff_human",
+  "trg_human_invites_bootstrap_empty",
+  "trg_humans_keep_last_active_admin_update",
+  "trg_humans_keep_last_active_admin_delete",
+]);
 
 function fail(message) {
   throw new Error(message);
@@ -120,6 +132,14 @@ async function batchD1(config, databaseId, statements) {
   return results;
 }
 
+function rowsFrom(results) {
+  const rows = [];
+  for (const result of results) {
+    if (Array.isArray(result?.results)) rows.push(...result.results);
+  }
+  return rows;
+}
+
 async function listMigrationFiles() {
   const entries = await readdir(MIGRATIONS_DIR, { withFileTypes: true });
   return entries
@@ -182,6 +202,36 @@ async function readAppliedMigrations(config, databaseId) {
   return applied;
 }
 
+async function assertPhase4UnappliedState(config, databaseId, fileName) {
+  if (fileName !== PHASE4_MIGRATION) return;
+
+  const columns = new Set(
+    rowsFrom(await queryD1(config, databaseId, "PRAGMA table_info(boards);"))
+      .map((row) => row?.name)
+      .filter((name) => typeof name === "string"),
+  );
+  const quoted = PHASE4_OBJECT_NAMES.map((name) => sqlString(name)).join(", ");
+  const objects = new Set(
+    rowsFrom(await queryD1(
+      config,
+      databaseId,
+      `SELECT name FROM sqlite_schema WHERE name IN (${quoted});`,
+    ))
+      .map((row) => row?.name)
+      .filter((name) => typeof name === "string"),
+  );
+
+  const present = [];
+  if (columns.has("status")) present.push("column:boards.status");
+  if (columns.has("sort_order")) present.push("column:boards.sort_order");
+  for (const name of PHASE4_OBJECT_NAMES) {
+    if (objects.has(name)) present.push(name);
+  }
+  if (present.length) {
+    fail(`Refusing to apply ${fileName}: unrecorded Phase 4 schema state already exists (${present.join(", ")}). Run npm run inspect and repair deliberately.`);
+  }
+}
+
 async function loadMigration(fileName) {
   const sql = await readFile(resolve(MIGRATIONS_DIR, fileName), "utf8");
   return splitMigrationSql(sql, fileName);
@@ -212,6 +262,7 @@ async function applyMigrations() {
   const newlyApplied = [];
   for (const fileName of migrationFiles) {
     if (applied.has(fileName)) continue;
+    await assertPhase4UnappliedState(config, database.id, fileName);
     const statements = await loadMigration(fileName);
     const marker = `INSERT INTO aura_schema_migrations(name, applied_at) VALUES (${sqlString(fileName)}, unixepoch());`;
     await batchD1(config, database.id, [...statements, marker]);
