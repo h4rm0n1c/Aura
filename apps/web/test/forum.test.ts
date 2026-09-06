@@ -13,6 +13,7 @@ import {
 } from "../src/forum/service.ts";
 import { handleForumRequest } from "../src/forum/routes.ts";
 import type { D1DatabaseLike, D1PreparedStatementLike, D1ResultLike } from "../src/db/d1.ts";
+import { AURA_CSS } from "../src/ui.ts";
 
 const migration1 = readFileSync(new URL("../../../db/migrations/0001_initial.sql", import.meta.url), "utf8");
 const migration2 = readFileSync(new URL("../../../db/migrations/0002_human_membership_and_board_staff.sql", import.meta.url), "utf8");
@@ -132,21 +133,49 @@ test("forum board index exposes active boards with useful thread counts", async 
   const member = seedHuman(db, MEMBER, "member");
   seedBoards(db);
   await createThread(db, member);
+  for (let index = 2; index <= 6; index += 1) {
+    const created = await createHumanThread(db, member, {
+      boardId: BOARD,
+      title: `Thread ${index}`,
+      body: `Body ${index}`,
+    }, 100 + index);
+    assert.equal(created.ok, true);
+  }
 
   const boards = await listForumBoards(db, member);
   assert.equal(boards.ok, true);
   if (!boards.ok) return db.close();
   assert.equal(boards.value.length, 1);
   assert.equal(boards.value[0].slug, "general");
-  assert.equal(boards.value[0].threadCount, 1);
-  assert.equal(boards.value[0].openThreadCount, 1);
+  assert.equal(boards.value[0].threadCount, 6);
+  assert.equal(boards.value[0].openThreadCount, 6);
 
   const page = await getForumBoard(db, member, "general");
   assert.equal(page.ok, true);
-  if (page.ok) assert.equal(page.value.threads[0].author.displayName, "member");
+  if (page.ok) assert.equal(page.value.threads[0].title, "Thread 6");
   const archived = await getForumBoard(db, member, "old");
   assert.equal(archived.ok, false);
   if (!archived.ok) assert.equal(archived.error.code, "not_found");
+
+  const indexResponse = await handleForumRequest(
+    new Request("https://aura.example/"),
+    db,
+    new Uint8Array(32).fill(3),
+    member,
+    new URL("https://aura.example/"),
+  );
+  assert(indexResponse);
+  assert.equal(indexResponse.status, 200);
+  const indexHtml = await indexResponse.text();
+  assert.match(indexHtml, /<h2>Recent threads<\/h2>/);
+  assert.match(indexHtml, /<h2>All boards<\/h2>/);
+  assert.equal((indexHtml.match(/class="recent-thread-cell"/g) ?? []).length, 5);
+  assert.match(indexHtml, /Thread 6/);
+  assert.match(indexHtml, /Thread 2/);
+  assert.doesNotMatch(indexHtml, /First thread/);
+  assert.ok(indexHtml.indexOf("Recent threads") < indexHtml.indexOf("All boards"));
+  assert.match(AURA_CSS, /--shell-width: 1240px/);
+  assert.match(AURA_CSS, /\.board-strip-track \{ width: max-content; white-space: nowrap; text-align: left; \}/);
   db.close();
 });
 
