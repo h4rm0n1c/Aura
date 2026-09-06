@@ -26,23 +26,25 @@ const humanIdentity: VerifiedHumanIdentity = {
   provider: "cloudflare_access",
   providerId: "cf-user-123",
   email: "human@example.test",
-  displayName: "Human",
+  displayName: "Identity Provider Name",
 };
 
 const humanRecord: HumanAuthRecord = {
   humanId: "human-1",
   provider: "cloudflare_access",
   providerId: "cf-user-123",
+  displayName: "Aura Name",
   role: "member",
   status: "active",
 };
 
-test("human authentication takes role from Aura record, not identity text", () => {
+test("human authentication takes role and display name from Aura record", () => {
   const result = authenticateHuman(humanIdentity, humanRecord);
   assert.equal(result.ok, true);
   if (!result.ok) return;
   assert.equal(result.principal.role, "member");
   assert.equal(result.principal.email, "human@example.test");
+  assert.equal(result.principal.displayName, "Aura Name");
   assert.equal(principalKey(result.principal), "human:human-1");
 });
 
@@ -56,6 +58,13 @@ test("human authentication fails closed on identity mismatch and disable", () =>
     reason: "disabled_human",
   });
   assert.deepEqual(authenticateHuman(humanIdentity, null), { ok: false, reason: "unknown_human" });
+});
+
+test("human authentication rejects malformed Aura profile data", () => {
+  assert.deepEqual(authenticateHuman(humanIdentity, { ...humanRecord, displayName: "" }), {
+    ok: false,
+    reason: "invalid_human_record",
+  });
 });
 
 test("human role hierarchy is explicit", () => {
