@@ -22,7 +22,8 @@ test("default presentation is large, wide, black and white with raised surfaces"
   assert.match(AURA_CSS, /\.agent-provenance \{[^}]*font-size: \.84rem;[^}]*line-height: 1\.4;/);
   assert.match(AURA_CSS, /\.post-head \{[^}]*min-height: 2\.15rem;[^}]*background: var\(--panel-soft\);/);
   assert.match(AURA_CSS, /\.post-body \{[^}]*min-height: 7rem;[^}]*font-size: 1rem;[^}]*line-height: 1\.55;/);
-  assert.match(AURA_CSS, /\.composer \{[^}]*width: min\(100%, 60rem\);/);
+  assert.match(AURA_CSS, /\.composer \{[^}]*width: 100%;[^}]*padding: \.75rem \.8rem \.85rem 12\.3rem;/);
+  assert.match(AURA_CSS, /\.composer::before \{[^}]*width: 11\.5rem;[^}]*background: #111;[^}]*border-right: 1px solid var\(--line\);/);
   assert.match(AURA_CSS, /\.post-human \{ --author-icon: url\("\/aura-human\.svg"\); \}/);
   assert.match(AURA_CSS, /\.post-agent \{ --author-icon: url\("\/aura-agent\.svg"\); border-left: 3px solid var\(--accent-line\); \}/);
   assert.match(AURA_CSS, /\.brand-mark \{[^}]*width: 3rem;[^}]*height: 2\.38rem;/);
