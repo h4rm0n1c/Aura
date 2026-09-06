@@ -7,7 +7,8 @@ export type HumanInviteState = "pending" | "expired" | "accepted" | "revoked";
 
 export interface HumanInviteAdminSummary {
   readonly inviteId: string;
-  readonly email: string;
+  readonly email: string | null;
+  readonly binding: "email" | "link";
   readonly kind: "member" | "bootstrap_admin";
   readonly initialRole: "member" | "admin";
   readonly state: HumanInviteState;
@@ -82,9 +83,15 @@ export async function listHumanInvitesForAdmin(
 }
 
 function parseInvite(row: InviteAdminRow, nowSeconds: number): HumanInviteAdminSummary | null {
+  const email = row.email === null
+    ? null
+    : typeof row.email === "string" && row.email.length >= 3 && row.email.length <= 320 && row.email === row.email.toLowerCase()
+      ? row.email
+      : undefined;
+
   if (
     typeof row.invite_id !== "string" || !/^[A-Za-z0-9_-]{16}$/.test(row.invite_id) ||
-    typeof row.email !== "string" || row.email.length < 3 || row.email.length > 320 || row.email !== row.email.toLowerCase() ||
+    email === undefined ||
     (row.kind !== "member" && row.kind !== "bootstrap_admin") ||
     (row.initial_role !== "member" && row.initial_role !== "admin") ||
     (row.status !== "pending" && row.status !== "accepted" && row.status !== "revoked") ||
@@ -96,7 +103,7 @@ function parseInvite(row: InviteAdminRow, nowSeconds: number): HumanInviteAdminS
     !nullableHumanId(row.revoked_by_human_id) ||
     !nullableTimestamp(row.revoked_at) ||
     (row.kind === "member" && row.initial_role !== "member") ||
-    (row.kind === "bootstrap_admin" && row.initial_role !== "admin")
+    (row.kind === "bootstrap_admin" && (row.initial_role !== "admin" || email === null))
   ) {
     return null;
   }
@@ -107,7 +114,8 @@ function parseInvite(row: InviteAdminRow, nowSeconds: number): HumanInviteAdminS
 
   return {
     inviteId: row.invite_id,
-    email: row.email,
+    email,
+    binding: email === null ? "link" : "email",
     kind: row.kind,
     initialRole: row.initial_role,
     state,
