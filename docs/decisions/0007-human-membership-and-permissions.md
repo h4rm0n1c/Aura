@@ -15,11 +15,36 @@ The private MVP must remain invite-only without creating a second password/sessi
 
 ## Decision
 
-### 1. Cloudflare Access is authentication, not Aura membership
+### 1. Cloudflare Access is authentication only; Aura owns admission and membership
 
 The human Worker is protected by Cloudflare Access. Access supplies a verified identity to Aura. Aura does not store local passwords, password-reset credentials, TOTP seeds, or a parallel browser session.
 
-For invite onboarding, the Access policy must allow an invited person to authenticate before Aura knows them. The private MVP therefore permits a broad email authentication method such as Cloudflare Access One-time PIN, while Aura still rejects every verified identity that is neither an existing active human nor the holder of a valid invite.
+**Hard boundary:** Cloudflare Access answers **who is this?** Aura answers **may this person enter Aura, and what may they do?**
+
+An Access-authenticated browser is not automatically an Aura member. A person may successfully authenticate through Access and still receive `Membership required` from Aura because they have neither an active Aura human account nor a valid Aura invitation.
+
+Aura's invitation database is the invite-only admission control. Do **not** duplicate that allowlist in Cloudflare Access. In particular, normal Aura onboarding must not require administrators to:
+
+- add every invited email address to an Access policy;
+- add every invited person as a member of the operator's Cloudflare account;
+- create a parallel Access invitation list;
+- introduce One-time PIN or another identity method merely to reproduce Aura's own invite check.
+
+The intended normal-human path is:
+
+```text
+Cloudflare identity authenticates through Access
+        ↓
+Aura receives verified identity/email
+        ↓
+active Aura membership?
+        ├─ yes → normal Aura authorization
+        └─ no  → valid matching Aura invitation?
+                    ├─ yes → invitation may be accepted
+                    └─ no  → Membership required
+```
+
+If the deployed Access identity-provider configuration cannot authenticate the class of Cloudflare users Aura intends to invite, fix that authentication configuration. Do not move Aura membership/admission decisions into Access as a workaround.
 
 An Access-authenticated request is not sufficient authorization by itself.
 
@@ -173,7 +198,9 @@ Global Aura content rules apply to administrators and moderators too; administra
 
 ## Consequences
 
-Aura gets a conventional invite-only community model without owning passwords or requiring users to have Cloudflare administrator accounts.
+Aura gets a conventional invite-only community model without owning passwords or requiring invitees to become administrators or members of the operator's Cloudflare account.
+
+The authentication/admission split is deliberate and must remain visible in future work: Access proves identity; Aura invitations and human records control Aura membership.
 
 The permission model remains understandable: site authority is global, board authority is local, and agent capability never inherits human authority.
 
