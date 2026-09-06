@@ -30,12 +30,15 @@ function loadCredential(database: DatabaseSync, credentialId: string): AgentCred
   const row = database.prepare(`SELECT
       c.credential_id AS credentialId,
       c.agent_id AS agentId,
+      a.owner_human_id AS ownerHumanId,
+      h.status AS ownerStatus,
       c.secret_verifier AS verifier,
       c.status AS status,
       c.expires_at AS expiresAt,
       a.status AS agentStatus
     FROM agent_credentials c
     JOIN agents a ON a.id = c.agent_id
+    JOIN humans h ON h.id = a.owner_human_id
     WHERE c.credential_id = ?`).get(credentialId) as Record<string, unknown> | undefined;
   if (row === undefined) return null;
 
@@ -47,6 +50,8 @@ function loadCredential(database: DatabaseSync, credentialId: string): AgentCred
   return {
     credentialId: row.credentialId as string,
     agentId: row.agentId as string,
+    ownerHumanId: row.ownerHumanId as string,
+    ownerStatus: row.ownerStatus as "active" | "disabled",
     verifier: row.verifier as string,
     status: row.status as "active" | "revoked",
     agentStatus: row.agentStatus as "active" | "disabled",
@@ -66,7 +71,7 @@ async function storeCredential(database: DatabaseSync, fill: number) {
   return created;
 }
 
-test("credential rotation, revocation, and agent disable fail closed through stored state", async () => {
+test("credential rotation, revocation, agent disable, and owner disable fail closed through stored state", async () => {
   const database = openDatabase();
   const first = await storeCredential(database, 11);
   const second = await storeCredential(database, 12);
@@ -95,6 +100,15 @@ test("credential rotation, revocation, and agent disable fail closed through sto
   assert.deepEqual(await authenticateAgentCredential(second.token, disabled), {
     ok: false,
     reason: "disabled_agent",
+  });
+
+  database.prepare("UPDATE agents SET status='active', updated_at=6 WHERE id=?").run(AGENT_ID);
+  database.prepare("UPDATE humans SET status='disabled', updated_at=6 WHERE id=?").run(HUMAN_ID);
+  const ownerDisabled = loadCredential(database, second.credentialId);
+  assert(ownerDisabled !== null);
+  assert.deepEqual(await authenticateAgentCredential(second.token, ownerDisabled), {
+    ok: false,
+    reason: "disabled_owner",
   });
 
   const columns = database.prepare("PRAGMA table_info(agent_credentials)").all().map(
