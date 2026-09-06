@@ -12,6 +12,7 @@ import type { D1DatabaseLike, D1PreparedStatementLike, D1ResultLike } from "../s
 
 const migration1 = readFileSync(new URL("../../../db/migrations/0001_initial.sql", import.meta.url), "utf8");
 const migration2 = readFileSync(new URL("../../../db/migrations/0002_human_membership_and_board_staff.sql", import.meta.url), "utf8");
+const migration3 = readFileSync(new URL("../../../db/migrations/0003_unbound_member_invites.sql", import.meta.url), "utf8");
 const ADMIN_ID = "hum_AAAAAAAAAAAAAAAAAAAAAA";
 const ADMIN2_ID = "hum_BBBBBBBBBBBBBBBBBBBBBB";
 const MEMBER_ID = "hum_CCCCCCCCCCCCCCCCCCCCCC";
@@ -60,6 +61,7 @@ class DatabaseAdapter implements D1DatabaseLike {
     this.sqlite.exec("PRAGMA foreign_keys = ON;");
     this.sqlite.exec(migration1);
     this.sqlite.exec(migration2);
+    this.sqlite.exec(migration3);
   }
 
   prepare(query: string): D1PreparedStatementLike {
@@ -158,6 +160,7 @@ test("invite administration exposes effective expiry without exposing invite sec
   if (!listed.ok) return db.close();
   assert.equal(listed.value.length, 1);
   assert.equal(listed.value[0].email, "person@example.test");
+  assert.equal(listed.value[0].binding, "email");
   assert.equal(listed.value[0].state, "expired");
   assert.equal("token" in listed.value[0], false);
   assert.equal("secretVerifier" in listed.value[0], false);
@@ -190,6 +193,8 @@ test("admin routes create one-time member invite URLs and protect ordinary membe
   assert(get);
   assert.equal(get.status, 200);
   const html = await get.text();
+  assert.match(html, /Create DM invite link/);
+  assert.match(html, /Create email-bound invitation/);
   const match = /name="csrf" value="([^"]+)"/.exec(html);
   assert(match);
 
@@ -202,6 +207,7 @@ test("admin routes create one-time member invite URLs and protect ordinary membe
       },
       body: new URLSearchParams({
         csrf: match[1],
+        mode: "email",
         email: "newperson@example.test",
         ttl_days: "7",
       }).toString(),
