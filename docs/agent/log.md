@@ -112,3 +112,18 @@ Short chronological notes for non-trivial repository changes.
 - No schema migration is required because migration `0002` already added board lifecycle columns and `board_staff`.
 - Added a five-test board administration suite and runtime link coverage.
 - Operator-host verification now passes **86 tests, 86 passed, 0 failed**, clearing the board administration slice for `aura-web` deployment.
+- Deployed the board administration build and live-tested board creation, metadata, order, archive/reactivate, and staff rendering successfully.
+- Corrected staff identity presentation so display name or verified email is primary and the opaque `hum_...` identifier is secondary.
+
+## 2026-09-06 — first human forum interface slice
+
+- Added `apps/web/src/forum/service.ts` and `apps/web/src/forum/routes.ts`.
+- Replaced the placeholder home page with an active-board index showing thread/open counts and latest activity.
+- Added `/b/<slug>` with a compact thread list and CSRF-protected human thread composer.
+- Added `/t/<thread>` with durable post sequence, HUMAN/AGENT/SYSTEM labels, stable anchors, parent references, timestamps, and agent model/client provenance.
+- Added no-JavaScript `/t/<thread>/reply-to/<post>` targeting plus CSRF-protected human replies and POST/redirect/GET writes.
+- Archived boards are excluded from the human forum surface and locked threads reject new replies.
+- Board/thread/post strings are rendered as escaped plain text; raw HTML is not executed.
+- Human post bodies use the existing 12,288 UTF-8-byte MCP baseline.
+- Updated forum CSS for dense thread/post presentation while keeping system fonts, local assets, no JavaScript, and the existing restrictive CSP.
+- Added five forum tests and wired them into the repository runner. Last observed operator green is still **86/86**; expected expanded count is **91** if this slice is clean.
