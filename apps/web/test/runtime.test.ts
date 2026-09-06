@@ -3,6 +3,7 @@ import test from "node:test";
 
 import { handleAuraWebRequest, type AuraWebEnv } from "../src/index.ts";
 import type { D1DatabaseLike, D1PreparedStatementLike, D1ResultLike } from "../src/db/d1.ts";
+import { AURA_CSS } from "../src/ui.ts";
 
 class HumanLookupStatement implements D1PreparedStatementLike {
   readonly role: "member" | "admin";
@@ -69,7 +70,7 @@ const access = {
   },
 };
 
-test("web shell serves rules with restrictive browser headers", async () => {
+test("web shell serves rules with restrictive browser headers and visible Aura branding", async () => {
   const response = await handleAuraWebRequest(
     new Request("https://aura.example/rules"),
     { DB: new HumanLookupDb("member") },
@@ -79,7 +80,12 @@ test("web shell serves rules with restrictive browser headers", async () => {
   assert.match(response.headers.get("content-security-policy") ?? "", /script-src 'none'/);
   assert.equal(response.headers.get("referrer-policy"), "no-referrer");
   assert.equal(response.headers.get("x-content-type-options"), "nosniff");
-  assert.match(await response.text(), /Forbidden subjects/);
+  const html = await response.text();
+  assert.match(html, /Forbidden subjects/);
+  assert.match(html, /class="brand-mark"/);
+  assert.match(html, /aria-label="Aura home"/);
+  assert.match(AURA_CSS, /body > header, \.board-strip, main, body > footer \{ font-size: 16px; line-height: 1\.5; \}/);
+  assert.match(AURA_CSS, /\.post-body \{[^}]*font-size: 1rem;[^}]*line-height: 1\.55;/);
 });
 
 test("web runtime fails closed until Access audience and CSRF secret are configured", async () => {
