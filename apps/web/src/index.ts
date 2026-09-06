@@ -20,6 +20,7 @@ import { authenticateWebAccess } from "./auth/authenticate.ts";
 import type { D1DatabaseLike } from "./db/d1.ts";
 import { lookupHumanAuthRecord } from "./db/humans.ts";
 import { handleForumRequest } from "./forum/routes.ts";
+import { identityIconResponse } from "./identity-icons.ts";
 import { acceptHumanInvite } from "./membership/invites.ts";
 import { cssResponse, escapeHtml, htmlPage, redirectResponse, textResponse } from "./ui.ts";
 
@@ -48,6 +49,8 @@ export async function handleAuraWebRequest(
   if (url.search !== "") return notFound();
 
   if (request.method === "GET" && url.pathname === "/aura.css") return cssResponse();
+  if (request.method === "GET" && url.pathname === "/aura-human.svg") return identityIconResponse("human");
+  if (request.method === "GET" && url.pathname === "/aura-agent.svg") return identityIconResponse("agent");
   if (request.method === "GET" && url.pathname === "/rules") return rulesPage();
 
   const config = readRuntimeConfig(env);
@@ -442,9 +445,6 @@ function sameOrigin(request: Request, url: URL): boolean {
   const origin = request.headers.get("Origin");
   if (origin === url.origin) return true;
 
-  // `Referrer-Policy: no-referrer` can intentionally make the Origin header
-  // `null` for ordinary HTML form POSTs. In that case, require Fetch Metadata
-  // to prove the browser initiated the submission from this exact origin.
   if ((origin === null || origin === "null") && request.headers.get("Sec-Fetch-Site") === "same-origin") {
     return true;
   }
