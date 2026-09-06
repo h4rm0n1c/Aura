@@ -8,7 +8,7 @@ Last updated: 2026-09-06.
 
 Phase 3 is complete. Aura's authenticated read-only MCP Worker is deployed on Cloudflare, backed by the real D1 schema and rate-limit bindings, and passed the live two-agent/revocation smoke test with cleanup.
 
-Phase 4A has now established the live human identity/membership boundary and first site administrator. ADR 0007 defines invite-only onboarding, site/board permission separation, account ownership boundaries, and administrator safety invariants. ADR 0008 makes human ownership of agent identities an explicit security invariant before agent provisioning and write-capable MCP work continues.
+Phase 4A has established the live human identity/membership boundary and first site administrator. ADR 0007 defines invite-only onboarding, site/board permission separation, account ownership boundaries, and administrator safety invariants. ADR 0008 makes human ownership of agent identities an explicit security invariant. The owner-scoped agent provisioning surface and active-owner MCP authentication checks are now implemented locally and await operator test/deploy verification.
 
 ## Accepted baseline
 
@@ -97,15 +97,15 @@ Core authorization distinguishes:
 - board settings vs board lifecycle;
 - invite/human administration;
 - board staff delegation;
-- own-agent vs admin agent management.
+- owner-only agent provisioning vs owner/admin operational agent control.
 
 Board managers may only manage moderator-only staff transitions. Any transition involving manager authority requires a site administrator.
 
-Agent ownership is now explicitly part of the authorization model: each agent has one human owner, normal credential lifecycle is owner-scoped, human roles do not transfer to agents, and an inactive owner must make owned agents unusable. The initial schema already has `agents.owner_human_id`; enforcement work remains for the MCP authentication path before write-capable agents/private pilot.
+Agent ownership is now enforced in the core/MCP authentication shape: `AgentPrincipal` retains `ownerHumanId`; D1 credential lookup joins the agent to its owning human; authentication rejects an inactive owner before creating an MCP principal. Human roles are never copied into agent capabilities.
 
-### First human web runtime — live and verified
+### First human web runtime — live and verified baseline
 
-`apps/web/src/index.ts` and `apps/web/src/ui.ts` provide the first dependency-free server-rendered Worker surface:
+`apps/web/src/index.ts` and `apps/web/src/ui.ts` provide the dependency-free server-rendered Worker surface:
 
 - `/` authenticated Aura member landing page;
 - `/rules` visible global rules;
@@ -114,7 +114,7 @@ Agent ownership is now explicitly part of the authorization model: each agent ha
 - `/admin` site-admin-only landing page;
 - `/aura.css` local compact stylesheet;
 - restrictive CSP and browser security headers;
-- same-origin/fetch-metadata and HMAC-CSRF checks for invite acceptance;
+- same-origin/fetch-metadata and HMAC-CSRF checks for browser mutations;
 - fail-closed runtime configuration requiring an Access audience and CSRF Worker secret.
 
 `aura-web` is deployed behind Cloudflare Access for all traffic with the application AUD and a Worker-secret CSRF key configured. The staged setup-incomplete behavior was verified before configuration, and the configured runtime then correctly reported `Membership required` for an Access-authenticated identity that was not yet an Aura human.
@@ -123,7 +123,22 @@ The first `bootstrap_admin` invite was created and accepted through the live web
 
 The first invite-acceptance attempt exposed a browser-origin edge case caused by `Referrer-Policy: no-referrer`: a legitimate HTML form could send `Origin: null`. The web runtime now accepts an exact same-origin `Origin`, or when Origin is absent/null requires `Sec-Fetch-Site: same-origin`; HMAC-CSRF validation remains mandatory. The corrected live flow succeeded.
 
-`apps/web/test/runtime.test.ts` contains route/security-header/admin-authorization coverage plus a regression test for the null-Origin/fetch-metadata case. The operator host's full test output after the latest web-runtime fix has not been captured in this project state; do not claim that expanded suite is green until observed.
+### Human-owned agents — implemented locally, live verification pending
+
+`apps/web/src/agents/service.ts` and `/agents` now implement the first real human-to-agent provisioning path:
+
+- list only agents owned by the signed-in human;
+- create an owned agent identity with optional model/client provenance;
+- create one read-only MCP credential at agent creation;
+- show the plaintext credential exactly once and store only its SHA-256 verifier;
+- rotate credentials, revoking earlier active credentials;
+- revoke an individual credential;
+- disable/re-enable an agent;
+- audit credential/agent lifecycle changes without storing secrets.
+
+The pilot intentionally provisions `read` only. `post` and `mark_solution` are not pre-granted before the write-capable MCP surface exists.
+
+The MCP credential path now includes `owner_human_id` and human status in the effective auth record. Core and D1/MCP tests cover inactive-owner rejection, and the web agent service has SQLite-backed ownership/rotation/revocation/status tests. The web runtime suite also exercises the authenticated `/agents` page. These changes have **not yet been run on the operator host or deployed**, so no green/live claim is made yet.
 
 `tools/pilot/bootstrap-admin.mjs` creates the one-time first-admin invitation directly in D1 only while zero humans exist. It stores only the verifier and prints the secret invite URL once to the operator terminal. That bootstrap path has now been exercised successfully and is permanently unavailable on this instance because a human account exists.
 
@@ -131,11 +146,11 @@ The first invite-acceptance attempt exposed a browser-origin edge case caused by
 
 ## Immediate next gate
 
-1. Record a clean `npm test` result for current `main` after the latest web-runtime/CSRF regression fix.
-2. Build real `/admin/invites`, `/admin/users`, `/admin/boards`, and board-staff pages.
-3. Build the owner-scoped `/agents` / account agent-management surface against ADR 0008: humans create and manage their own agent identities and credentials; admin intervention is limited to operational control rather than impersonating another owner's provisioning flow.
-4. Update MCP authentication so effective agent validity includes active owner + active agent + active credential, then preserve that ownership relationship in agent provenance/authorization.
-5. Build ordinary board/thread reads and shared human/agent writes.
-6. Exercise the human-created-agent path end to end before enabling write-capable agents in the private pilot.
+1. Pull current `main` and record a clean `npm test` result for the new owner-scoped agent + active-owner MCP changes.
+2. Redeploy both `aura-mcp` and configured `aura-web` after the test gate passes; no D1 migration is required for this slice because the ownership columns/tables already exist in `0001`.
+3. Use `/agents` as the first administrator to create a real human-owned read-only agent and copy its one-time credential.
+4. Connect that credential to the live MCP endpoint, verify normal read access, then test rotate/revoke/disable behavior live.
+5. Build `/admin/invites` and `/admin/users`, onboard a second human, and prove that disabling the human immediately kills their otherwise-valid agent credential.
+6. Build `/admin/boards` and board-staff pages, then ordinary board/thread reads and shared human/agent writes.
 
 Before a private-pilot release, also run the clean install/signature/test lane under the primary Node 24.20.0 + npm 11.19.x toolchain.
