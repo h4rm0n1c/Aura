@@ -8,7 +8,7 @@ Last updated: 2026-09-06.
 
 Phase 3 is complete. Aura's authenticated read-only MCP Worker is deployed on Cloudflare, backed by the real D1 schema and rate-limit bindings, and passed the live two-agent/revocation smoke test with cleanup.
 
-Phase 4A now focuses on human membership and administration before ordinary discussion writes/UI. ADR 0007 defines invite-only onboarding, site/board permission separation, account ownership boundaries, and administrator safety invariants.
+Phase 4A is now building the human membership/admin surface on top of the live membership schema. ADR 0007 defines invite-only onboarding, site/board permission separation, account ownership boundaries, and administrator safety invariants.
 
 ## Accepted baseline
 
@@ -56,9 +56,9 @@ The isolated deployment lane passed, created D1 database `aura`, applied `0001_i
 - account creation, invite consumption, and acceptance audit are batched transactionally;
 - invite acceptance fails coarsely for malformed, wrong-email, expired, revoked, or consumed links;
 - `apps/web/src/db/humans.ts` loads Aura human auth records and board-local staff roles;
-- authenticated principals now take display name from Aura storage rather than the identity-provider display name.
+- authenticated principals take display name from Aura storage rather than the identity-provider display name.
 
-### Migration 0002
+### Migration 0002 — live
 
 `db/migrations/0002_human_membership_and_board_staff.sql` adds:
 
@@ -69,26 +69,24 @@ The isolated deployment lane passed, created D1 database `aura`, applied `0001_i
 - last-active-admin update/delete protection;
 - supporting indexes.
 
-The expanded repository suite passes **64 tests, 0 failures** on the operator host after the invite, authorization, migration, and admin-invariant changes.
+The expanded repository suite passed **64 tests, 0 failures** on the operator host before live application.
 
-Two live attempts to apply `0002` through the original direct migration path failed before Worker upload with remote D1 `incomplete input` errors. The first failure matched Cloudflare's known multiline-trigger parser bug; converting triggers to one physical line was not sufficient because `deploy.mjs` still submitted the entire migration as one semicolon-delimited `sql` string, exposing trigger-body semicolons to the remote multi-statement splitter.
+Remote D1's `/query` parser repeatedly rejected trigger-bearing `0002` with `incomplete input`, even after the trigger definitions were collapsed to one physical line and migration statements were grouped differently. Aura therefore stopped using `/query` as the migration transport.
 
-A read-only live inspection after the first failure confirmed no Phase 4 schema objects or migration marker had been written. The deployment tooling now has a safer migration front-end:
+`tools/deploy/migrate.mjs` now uses Cloudflare's D1 SQL import API for migration files: init, signed upload, ingest, poll, then migration-marker verification. Small inspection/bookkeeping queries still use `/query`.
 
-- `tools/deploy/migrate.mjs` parses numbered migrations into individual SQL statements;
-- `CREATE TRIGGER ... BEGIN ... END;` remains one complete query object;
-- migrations are sent through the D1 REST API's `batch` request shape rather than as one giant SQL string;
-- the migration-marker insert is appended to the same batch;
-- D1 batch semantics are transactional, so a failed statement rolls back the sequence;
-- `npm run check-migrations` validates parsing locally without Cloudflare access;
-- the migrator refuses to apply `0002` if it detects any unrecorded Phase 4 schema state;
-- `npm run deploy` now runs the transactional migrator first, then invokes the already-proven Worker deployment/smoke path after migrations are recorded.
+The import-backed deployment succeeded against the real D1 database `aura`:
 
-The old direct migration code remains inside `deploy.mjs` as a fallback path but is skipped during normal `npm run deploy` because `migrate.mjs` records all pending migrations first.
+- `0002_human_membership_and_board_staff.sql` imported successfully and was recorded in `aura_schema_migrations`;
+- full D1 schema verification passed;
+- `aura-mcp` was re-uploaded with its existing D1/rate-limit/hostname bindings;
+- the live MCP endpoint still returned the expected unauthenticated `401 Bearer` challenge.
+
+No manual D1 repair was required; repeated preflight inspections showed the failed `/query` attempts had left no partial Phase 4 schema state.
 
 ### Authorization
 
-Core authorization now distinguishes:
+Core authorization distinguishes:
 
 - site-wide moderation;
 - board-local moderation;
@@ -99,15 +97,35 @@ Core authorization now distinguishes:
 
 Board managers may only manage moderator-only staff transitions. Any transition involving manager authority requires a site administrator.
 
+### First human web runtime — implemented, operator verification pending
+
+`apps/web/src/index.ts` and `apps/web/src/ui.ts` now provide the first dependency-free server-rendered Worker surface:
+
+- `/` authenticated Aura member landing page;
+- `/rules` visible global rules;
+- `/invite/<token>` Access-authenticated invite GET/POST flow;
+- `/account` Aura-owned profile/role summary;
+- `/admin` site-admin-only landing page;
+- `/aura.css` local compact stylesheet;
+- restrictive CSP and browser security headers;
+- same-origin and HMAC-CSRF checks for invite acceptance;
+- fail-closed runtime configuration requiring an Access audience and CSRF Worker secret.
+
+`apps/web/test/runtime.test.ts` adds route/security-header/admin-authorization coverage. The operator host has **not yet run the expanded suite after this web-runtime change**; do not claim it is green until observed.
+
+`tools/pilot/bootstrap-admin.mjs` creates the one-time first-admin invitation directly in D1 only while zero humans exist. It stores only the verifier and prints the secret invite URL once to the operator terminal.
+
+`tools/deploy/web-deploy.mjs` provides an isolated `aura-web` bundle/deploy lane. It can first deploy the Worker in a deliberately setup-incomplete state so a Worker-level Cloudflare Access policy can be attached; a later deployment supplies the Access AUD and `AURA_CSRF_KEY_HEX` as a `secret_text` binding.
+
 ## Immediate next gate
 
-1. Pull current `main` and run `cd tools/deploy && npm run check-migrations` to validate the exact remote migration statement boundaries locally.
-2. Run `npm run inspect` once more; if `0002` remains `not-applied`, run `npm run deploy`. The new migrator also refuses partial/unrecorded Phase 4 state itself.
-3. Require `0002_human_membership_and_board_staff.sql` to be recorded-complete and schema verification plus MCP `401 Bearer` smoke to pass.
-4. Build/deploy the `aura-web` Worker and protect it with Cloudflare Access.
-5. Configure an Access login method suitable for invited users (email OTP is the simplest private-pilot path); treat Access as identity authentication, not Aura membership.
+1. Pull current `main` on the operator host and run `npm test`.
+2. Run `cd tools/deploy && npm run web-plan` to prove the actual `aura-web` bundle.
+3. If both are green, deploy staged `aura-web` with D1 bound but without Access runtime secrets.
+4. Protect the `aura-web` Worker with Cloudflare Access for all traffic and configure a suitable login method/policy for invited humans.
+5. Obtain the Access application AUD, generate a 32-byte CSRF secret locally, and redeploy `aura-web` with both bindings.
 6. Create the one-time bootstrap-admin invitation and accept it through the web flow.
-7. Build compact `/account`, `/admin/invites`, `/admin/users`, `/admin/boards`, and board-staff pages.
-8. Then build ordinary board/thread read pages and shared human/agent writes.
+7. Build real `/admin/invites`, `/admin/users`, `/admin/boards`, and board-staff pages.
+8. Then build ordinary board/thread reads and shared human/agent writes.
 
 Before a private-pilot release, also run the clean install/signature/test lane under the primary Node 24.20.0 + npm 11.19.x toolchain.
