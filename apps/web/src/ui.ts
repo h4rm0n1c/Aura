@@ -42,7 +42,7 @@ export const AURA_CSS = String.raw`
 body { margin: 0; background: var(--bg); color: var(--text); font-size: 15px; line-height: 1.45; }
 a { color: var(--link); }
 a:focus-visible, button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 3px solid currentColor; outline-offset: 2px; }
-header { border-bottom: 1px solid var(--line); background: var(--panel); }
+body > header { border-bottom: 1px solid var(--line); background: var(--panel); }
 .bar { max-width: 1050px; margin: 0 auto; padding: .55rem .8rem; display: flex; gap: 1rem; align-items: baseline; flex-wrap: wrap; }
 .brand { font-weight: 800; letter-spacing: .02em; text-decoration: none; color: var(--text); }
 nav { display: flex; gap: .8rem; flex-wrap: wrap; }
@@ -60,7 +60,7 @@ dd { margin: 0; }
 form { margin: .75rem 0; }
 label { display: block; font-weight: 700; margin-bottom: .25rem; }
 input, textarea, select, button { font: inherit; }
-input[type="text"], input[type="email"], textarea, select { border: 1px solid var(--line); background: var(--panel); color: var(--text); padding: .45rem .5rem; }
+input[type="text"], input[type="email"], input[type="number"], textarea, select { border: 1px solid var(--line); background: var(--panel); color: var(--text); padding: .45rem .5rem; }
 input[type="text"], input[type="email"], textarea { width: min(100%, 42rem); }
 button { border: 1px solid var(--line); background: var(--panel); color: var(--text); padding: .4rem .75rem; cursor: pointer; }
 button:hover { filter: brightness(.97); }
@@ -75,11 +75,35 @@ th, td { border-bottom: 1px solid var(--line); padding: .45rem .55rem; text-alig
 th { white-space: nowrap; background: var(--bg); }
 tr:last-child td { border-bottom: 0; }
 td form.inline { display: inline-flex; gap: .35rem; align-items: center; margin: .1rem .45rem .1rem 0; }
-footer { max-width: 1050px; margin: 1rem auto; padding: 0 .8rem 1rem; color: var(--muted); font-size: .85rem; }
+.forum-heading { display: flex; justify-content: space-between; gap: 1rem; align-items: flex-start; flex-wrap: wrap; }
+.forum-heading h1 { margin-bottom: .2rem; }
+.forum-actions { margin-top: .25rem; }
+.board-link { text-decoration: none; }
+.board-link:hover { text-decoration: underline; }
+.thread-stats { margin: .35rem 0 .65rem; }
+.thread-state { display: inline-block; min-width: 4.2rem; font-weight: 700; text-transform: uppercase; font-size: .78rem; letter-spacing: .035em; }
+.state-solved { color: var(--muted); }
+.state-locked { color: var(--danger); }
+.author-kind { font-size: .72rem; font-weight: 800; letter-spacing: .055em; color: var(--muted); }
+.posts { margin: .7rem 0; }
+.post { border: 1px solid var(--line); background: var(--panel); margin: .55rem 0; }
+.post-head { padding: .38rem .55rem; border-bottom: 1px solid var(--line); background: var(--bg); font-size: .86rem; overflow-wrap: anywhere; }
+.post-agent .post-head { background: var(--accent); }
+.post-number { font-weight: 700; margin-left: .25rem; }
+.post-actions { float: right; margin-left: .8rem; }
+.parent-link { margin-left: .35rem; }
+.agent-provenance { padding: .25rem .55rem 0; }
+.post-body { padding: .65rem .7rem; white-space: pre-wrap; overflow-wrap: anywhere; tab-size: 4; }
+.post-foot { padding: .25rem .55rem; border-top: 1px solid var(--line); color: var(--muted); font-size: .75rem; overflow-wrap: anywhere; }
+.composer textarea { width: 100%; max-width: 52rem; resize: vertical; }
+.reply-target { padding: .45rem .55rem; margin-bottom: .65rem; font-size: .9rem; }
+body > footer { max-width: 1050px; margin: 1rem auto; padding: 0 .8rem 1rem; color: var(--muted); font-size: .85rem; }
 @media (max-width: 640px) {
   .identity { margin-left: 0; width: 100%; }
   dl { grid-template-columns: 1fr; }
   dd { margin-bottom: .35rem; }
+  .post-actions { float: none; margin-left: .45rem; }
+  .thread-list th:nth-child(3), .thread-list td:nth-child(3) { display: none; }
 }
 `;
 
