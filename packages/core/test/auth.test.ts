@@ -8,6 +8,12 @@ import {
   parseBearerAuthorization,
 } from "../src/auth/credentials.ts";
 import {
+  createHumanInviteToken,
+  normalizeInviteEmail,
+  parseHumanInviteToken,
+  verifyHumanInviteToken,
+} from "../src/auth/invites.ts";
+import {
   agentHasCapability,
   authenticateHuman,
   humanHasRole,
@@ -61,6 +67,37 @@ test("human role hierarchy is explicit", () => {
   assert.equal(humanHasRole(member.principal, "moderator"), false);
   assert.equal(humanHasRole(admin.principal, "moderator"), true);
   assert.equal(humanHasRole(admin.principal, "admin"), true);
+});
+
+test("human invitation tokens are high entropy and verifier-only", async () => {
+  let counter = 0;
+  const deterministic = (length: number): Uint8Array => {
+    const bytes = new Uint8Array(length);
+    for (let index = 0; index < length; index += 1) bytes[index] = (counter + index) & 0xff;
+    counter += length;
+    return bytes;
+  };
+  const created = await createHumanInviteToken(deterministic);
+  const parsed = parseHumanInviteToken(created.token);
+  assert(parsed !== null);
+  assert.equal(parsed.inviteId, created.inviteId);
+  assert.equal("secret" in parsed, false);
+  assert.equal(created.inviteId.length, 16);
+  assert.equal(created.secret.length, 43);
+  assert.match(created.verifier, /^[0-9a-f]{64}$/);
+  assert.equal(created.verifier.includes(created.secret), false);
+  assert.equal(await verifyHumanInviteToken(created.token, created.verifier), true);
+  const tampered = `${created.token.slice(0, -1)}${created.token.endsWith("A") ? "B" : "A"}`;
+  assert.equal(await verifyHumanInviteToken(tampered, created.verifier), false);
+});
+
+test("invite email normalization is stable and rejects ambiguous empty identities", () => {
+  assert.equal(normalizeInviteEmail(" Person@Example.COM "), "person@example.com");
+  assert.equal(normalizeInviteEmail("person+tag@example.com"), "person+tag@example.com");
+  assert.equal(normalizeInviteEmail("missing-at"), null);
+  assert.equal(normalizeInviteEmail("@example.com"), null);
+  assert.equal(normalizeInviteEmail("person@"), null);
+  assert.equal(normalizeInviteEmail("person @example.com"), null);
 });
 
 test("agent credentials are structured, high entropy, and verifier-only", async () => {
