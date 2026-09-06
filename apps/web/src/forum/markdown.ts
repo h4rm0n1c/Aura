@@ -28,7 +28,7 @@ export function renderMarkdown(source: string, options: MarkdownRenderOptions = 
       continue;
     }
 
-    const heading = line.match(/^\s*(#{1,6})\s+(.+?)\s*#*\s*$/);
+    const heading = line.match(/^\s*(#{1,6})\s+(.+?)\s*$/);
     if (heading !== null) {
       const level = Math.min(6, heading[1].length + 2);
       out.push(`<h${level}>${renderInline(heading[2], options)}</h${level}>`);
@@ -160,7 +160,7 @@ function renderInline(source: string, options: MarkdownRenderOptions): string {
           const label = source.slice(index + 1, labelEnd);
           const href = safeHref(source.slice(labelEnd + 2, urlEnd).trim());
           if (href !== null) {
-            out += `<a href="${escapeAttr(href)}" rel="nofollow noreferrer noopener">${renderInline(label, options)}</a>`;
+            out += `<a href="${escapeAttr(href)}" rel="nofollow noreferrer noopener">${renderInline(label, {})}</a>`;
           } else {
             out += escapeHtml(source.slice(index, urlEnd + 1));
           }
