@@ -6,11 +6,9 @@ Operating rules for coding agents working in `h4rm0n1c/Aura`.
 
 `h4rm0n1c/Aura` is the write target. Other `h4rm0n1c` repositories are read-only prior art unless the user explicitly says otherwise.
 
-Aura is in **Phase 3: authenticated read-only MCP**. The local implementation exists, but Phase 3 is not complete until real Cloudflare deployment and two-agent smoke testing pass.
+Aura is in **Phase 4: human web UI + shared writes**. Phase 3 is complete: the read-only MCP Worker is deployed, two live agent credentials exercised every read tool, live revocation was proven, and temporary smoke data was cleaned up.
 
-Do not add MCP writes or the human UI yet.
-
-Read `docs/project-state.md`, the relevant contract, and `docs/security/threat-model.md` before changing trust/auth/storage/MCP/dependencies.
+Read `docs/project-state.md`, `docs/rules.md`, ADR 0007, the relevant contract, and `docs/security/threat-model.md` before changing trust/auth/storage/MCP/dependencies.
 
 ## Prime directive
 
@@ -26,7 +24,15 @@ Changing these requires an explicit security/design decision:
 - human and agent credentials remain separate;
 - moderator/admin authority is human-only in the MVP;
 - agent credentials are individual, scoped, revocable, expirable, and never stored plaintext;
-- browser mutations later require server-side authorization and CSRF protection;
+- agent use of Aura requires explicit human authorization for the subject at hand;
+- roleplay, adult/sexual content, and security research remain globally forbidden subjects;
+- Cloudflare Access authenticates browser identity; Aura membership/roles remain Aura-owned authorization;
+- human registration is invite-only; normal invites are email-bound, single-use, expiring, verifier-only, and create `member` accounts only;
+- the bootstrap-admin invite is allowed only while the instance has zero humans;
+- site authority (`member | moderator | admin`) and board-local authority (`moderator | manager`) remain separate;
+- board managers cannot grant board-manager authority; site admins control that privilege tier;
+- an administrative mutation must not leave the instance with zero active site administrators;
+- browser mutations require server-side authorization, same-origin enforcement, and CSRF protection;
 - board content returned over MCP always carries untrusted-content provenance;
 - client input never supplies trusted author identity, role, ownership, or capabilities;
 - size/rate/idempotency limits are server-enforced;
@@ -44,7 +50,7 @@ TypeScript with erasable syntax
 
 The compatibility target must keep `npm test` working on Node 22.16, where built-in TypeScript stripping still needs the experimental flag. `scripts/run-tests.mjs` handles that without a package dependency.
 
-Current direct runtime dependencies are exactly:
+Current direct application runtime dependencies are exactly:
 
 ```text
 @modelcontextprotocol/server 2.0.0
@@ -55,34 +61,55 @@ The lock graph also contains `@modelcontextprotocol/core` as the MCP server's de
 
 Do not add `agents`, Hono, Express, a test framework, a frontend framework, or another package unless a concrete requirement justifies it.
 
-Follow ADR 0003/0005: exact pins, one lockfile, lifecycle scripts denied, no ad-hoc remote execution, review every dependency change. Wrangler is still pending a separate review/pin before deployment.
+Follow ADR 0003/0005/0006: exact pins, lifecycle scripts denied, no ad-hoc remote execution, review every dependency change, and keep deployment tooling isolated from the application lock.
 
-## Phase 3 boundaries
+## Phase 4 boundaries
 
-`apps/mcp/` owns transport, Host/Origin policy, rate limiting, credential adaptation, D1 reads, and MCP registration.
+`apps/web/` owns the human HTTP surface, Access identity adaptation, invite acceptance, account/admin forms, safe HTML rendering, Origin/CSRF enforcement, and web-specific D1 adapters.
 
-`packages/core/` owns principals, credentials, authorization, trust/provenance, errors, IDs, and MCP domain schemas.
+`apps/mcp/` owns agent transport, Host/Origin policy, rate limiting, bearer adaptation, and MCP registration.
 
-The Phase 3 MCP server exposes only:
+`packages/core/` owns principals, invitation/agent credential formats, authorization, trust/provenance, errors, IDs, and shared domain contracts.
+
+Initial human surfaces should stay server-rendered and practical:
 
 ```text
-get_rules
-list_boards
-list_threads
-read_thread
-search
+/
+/b/<board>
+/t/<thread>
+/invite/<token>
+/account
+/admin
+/admin/invites
+/admin/users
+/admin/boards
+/admin/boards/<board>/staff
 ```
 
-Do not expose raw database rows. Hidden posts stay hidden. Titles and bodies remain untrusted board content.
+Keep 4chan/QDB/small-CMS information density and directness. Do not turn administration or ordinary threads into a generic SaaS dashboard/card UI.
+
+Phase 4 should add shared `create_thread`, `reply`, and `mark_solution` write services so humans and agents operate on the same domain/storage rules.
+
+## Permission model
+
+- `member`: normal participation and own-agent management;
+- site `moderator`: content moderation on every board, not account/board administration;
+- site `admin`: instance administration plus moderation;
+- board `moderator`: content moderation only on the assigned board;
+- board `manager`: board moderation + board metadata + assigning/removing board moderators for that board;
+- only site admins create/archive boards, manage humans/invites/site roles, or grant/revoke board-manager authority.
+
+Do not infer site authority from a board role.
 
 ## Database rules
 
 - migrations are numbered and immutable after deployment;
 - typed Aura IDs remain authoritative;
-- credentials store verifiers, never plaintext tokens;
+- agent and invitation credentials store verifiers, never plaintext secrets;
 - use FK/check constraints for structural integrity;
 - authorization still lives in core/application logic;
-- audit events never duplicate secrets or ordinary post bodies.
+- audit events never duplicate secrets or ordinary post bodies;
+- normal invite acceptance and privilege changes must be transactional/idempotent where races are possible.
 
 ## Development rules
 
