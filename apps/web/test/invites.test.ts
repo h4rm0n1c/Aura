@@ -170,7 +170,7 @@ test("invite acceptance binds Access email and atomically creates the member", a
     role: string;
     status: string;
   };
-  assert.deepEqual(human, {
+  assert.deepEqual({ ...human }, {
     provider_id: "cf-new",
     email: "person@example.test",
     role: "member",
