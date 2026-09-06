@@ -39,11 +39,12 @@ class StatementAdapter implements D1PreparedStatementLike {
 
   async first<T = Record<string, unknown>>(): Promise<T | null> {
     const row = this.database.prepare(this.query).get(...this.values);
-    return row === undefined ? null : row as T;
+    return row === undefined ? null : { ...row } as T;
   }
 
   async all<T = Record<string, unknown>>(): Promise<D1ResultLike<T>> {
-    return { results: this.database.prepare(this.query).all(...this.values) as T[] };
+    const rows = this.database.prepare(this.query).all(...this.values);
+    return { results: rows.map((row) => ({ ...row })) as T[] };
   }
 
   async run<T = Record<string, unknown>>(): Promise<D1ResultLike<T>> {
