@@ -3,6 +3,7 @@ import {
   type AgentCredentialStatus,
   type AgentPrincipal,
   type AgentStatus,
+  type HumanStatus,
   validateAgentCapabilities,
 } from "./principals.ts";
 
@@ -28,6 +29,8 @@ export interface NewAgentCredential extends ParsedAgentCredential {
 export interface AgentCredentialRecord {
   readonly credentialId: string;
   readonly agentId: string;
+  readonly ownerHumanId: string;
+  readonly ownerStatus: HumanStatus;
   readonly agentStatus: AgentStatus;
   readonly verifier: string;
   readonly capabilities: readonly unknown[];
@@ -40,6 +43,7 @@ export type AgentAuthFailure =
   | "credential_mismatch"
   | "revoked_credential"
   | "expired_credential"
+  | "disabled_owner"
   | "disabled_agent"
   | "invalid_credential_record"
   | "invalid_capability_set";
@@ -116,8 +120,10 @@ export async function authenticateAgentCredential(
   if (
     !nonEmpty(record.credentialId) ||
     !nonEmpty(record.agentId) ||
+    !nonEmpty(record.ownerHumanId) ||
     !isSha256Hex(record.verifier) ||
     (record.status !== "active" && record.status !== "revoked") ||
+    (record.ownerStatus !== "active" && record.ownerStatus !== "disabled") ||
     (record.agentStatus !== "active" && record.agentStatus !== "disabled") ||
     (record.expiresAt !== null &&
       (!Number.isSafeInteger(record.expiresAt) || record.expiresAt < 0)) ||
@@ -128,6 +134,9 @@ export async function authenticateAgentCredential(
 
   if (parsed.credentialId !== record.credentialId) {
     return { ok: false, reason: "credential_mismatch" };
+  }
+  if (record.ownerStatus !== "active") {
+    return { ok: false, reason: "disabled_owner" };
   }
   if (record.agentStatus !== "active") {
     return { ok: false, reason: "disabled_agent" };
@@ -154,6 +163,7 @@ export async function authenticateAgentCredential(
     principal: Object.freeze({
       kind: "agent",
       agentId: record.agentId,
+      ownerHumanId: record.ownerHumanId,
       credentialId: record.credentialId,
       capabilities,
     }),
