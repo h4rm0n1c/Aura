@@ -61,3 +61,10 @@ Short chronological notes for non-trivial repository changes.
 - Added a local-only deployment plan that bundles and validates configuration without requiring the Cloudflare API token or making Cloudflare changes.
 - Added an explicit direct Cloudflare deploy path for D1 creation/migrations, schema verification, Worker upload with D1/rate-limit bindings, `workers.dev` enablement, and an unauthenticated `401 Bearer` smoke test.
 - Kept Node 24.20/npm 11.19 as the primary release lane; its duplicate clean-install/signature/test pass remains a pre-pilot release check rather than a blocker for the Phase 3 deployment proof.
+
+## 2026-09-06 — deployment plan passed
+
+- Installed the isolated deploy lock on the operator host with one package, zero reported vulnerabilities, one verified registry signature, and one verified attestation.
+- `npm run plan` successfully bundled the real MCP Worker to 651,803 bytes using `esbuild-wasm@0.28.2`.
+- Plan resolved `aura-mcp.auramonster.workers.dev`, D1 database `aura`, rate-limit namespace IDs `1001`/`1002`, and migration `0001_initial.sql` without making any Cloudflare changes.
+- Rechecked current Cloudflare API documentation for multipart Worker upload bindings, D1 batched statements, and `workers.dev` subdomain enablement before advancing to the first real deployment.
