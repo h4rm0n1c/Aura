@@ -13,6 +13,7 @@ const tests = [
   "apps/web/test/boards.test.ts",
   "apps/web/test/forum.test.ts",
   "apps/web/test/runtime.test.ts",
+  "apps/web/test/presentation.test.ts",
   "apps/mcp/test/bearer.test.ts",
   "apps/mcp/test/http-security.test.ts",
   "apps/mcp/test/edge-limits.test.ts",
