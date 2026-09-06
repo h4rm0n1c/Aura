@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  authorizeAgentOperationalControl,
+  authorizeAgentProvisioning,
   authorizeBoardLifecycle,
   authorizeBoardModeration,
   authorizeBoardPost,
@@ -20,8 +22,8 @@ import type { AgentPrincipal, HumanPrincipal } from "../src/auth/principals.ts";
 const member: HumanPrincipal = { kind: "human", humanId: "human-1", role: "member", email: "member@example.test", displayName: null };
 const moderator: HumanPrincipal = { ...member, humanId: "human-2", role: "moderator" };
 const admin: HumanPrincipal = { ...member, humanId: "human-3", role: "admin" };
-const reader: AgentPrincipal = { kind: "agent", agentId: "agent-1", credentialId: "cred-1", capabilities: ["read"] };
-const poster: AgentPrincipal = { kind: "agent", agentId: "agent-2", credentialId: "cred-2", capabilities: ["read", "post", "mark_solution"] };
+const reader: AgentPrincipal = { kind: "agent", agentId: "agent-1", ownerHumanId: "human-1", credentialId: "cred-1", capabilities: ["read"] };
+const poster: AgentPrincipal = { kind: "agent", agentId: "agent-2", ownerHumanId: "human-1", credentialId: "cred-2", capabilities: ["read", "post", "mark_solution"] };
 
 test("human membership and agent capabilities are separate authorization paths", () => {
   assert.deepEqual(authorizeBoardRead(member), { ok: true });
@@ -36,13 +38,20 @@ test("locked threads reject normal replies regardless of participant type", () =
   assert.deepEqual(authorizeThreadReply(poster, "locked"), { ok: false, error: { code: "thread_locked" } });
 });
 
-test("site-wide moderation is human-only and agent management is owner-or-admin", () => {
+test("agent provisioning is owner-only while operational control is owner-or-admin", () => {
+  assert.deepEqual(authorizeAgentProvisioning(member, "human-1"), { ok: true });
+  assert.equal(authorizeAgentProvisioning(moderator, "human-1").ok, false);
+  assert.equal(authorizeAgentProvisioning(admin, "human-1").ok, false);
+  assert.deepEqual(authorizeAgentOperationalControl(member, "human-1"), { ok: true });
+  assert.equal(authorizeAgentOperationalControl(moderator, "human-1").ok, false);
+  assert.deepEqual(authorizeAgentOperationalControl(admin, "human-1"), { ok: true });
+  assert.deepEqual(authorizeManageAgent(admin, "human-1"), { ok: true });
+});
+
+test("site-wide moderation is human-only", () => {
   assert.equal(authorizeModeration(member).ok, false);
   assert.deepEqual(authorizeModeration(moderator), { ok: true });
   assert.equal(authorizeModeration(poster).ok, false);
-  assert.deepEqual(authorizeManageAgent(member, "human-1"), { ok: true });
-  assert.equal(authorizeManageAgent(moderator, "human-1").ok, false);
-  assert.deepEqual(authorizeManageAgent(admin, "human-1"), { ok: true });
 });
 
 test("board-local moderation does not grant site authority", () => {
