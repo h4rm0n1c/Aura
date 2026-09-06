@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { createHash } from "node:crypto";
 import { readFile, readdir } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -116,22 +117,6 @@ async function queryD1(config, databaseId, sql, params = []) {
   return results;
 }
 
-async function batchD1(config, databaseId, statements) {
-  if (!statements.length) fail("Refusing to send an empty D1 batch.");
-  const payload = await cfJson(
-    config,
-    `/accounts/${encodeURIComponent(config.accountId)}/d1/database/${encodeURIComponent(databaseId)}/query`,
-    "POST",
-    { batch: statements.map((sql) => ({ sql, params: [] })) },
-  );
-  const results = Array.isArray(payload?.result) ? payload.result : [];
-  if (results.length !== statements.length) {
-    fail(`D1 batch returned ${results.length} results for ${statements.length} statements.`);
-  }
-  if (results.some((result) => result?.success === false)) fail("D1 returned an unsuccessful migration statement.");
-  return results;
-}
-
 function rowsFrom(results) {
   const rows = [];
   for (const result of results) {
@@ -160,9 +145,7 @@ function splitMigrationSql(sql, fileName) {
     if (!line || line.startsWith("--")) continue;
 
     if (/^CREATE\s+TRIGGER\b/i.test(line)) {
-      if (current.length) {
-        fail(`Migration ${fileName} starts a trigger before the previous statement ended.`);
-      }
+      if (current.length) fail(`Migration ${fileName} starts a trigger before the previous statement ended.`);
       if (!line.endsWith(";")) {
         fail(`Migration ${fileName} has a multiline trigger; Aura remote migrations require CREATE TRIGGER on one physical line.`);
       }
@@ -193,13 +176,7 @@ async function readAppliedMigrations(config, databaseId) {
     "CREATE TABLE IF NOT EXISTS aura_schema_migrations (name TEXT PRIMARY KEY, applied_at INTEGER NOT NULL);",
   );
   const result = await queryD1(config, databaseId, "SELECT name FROM aura_schema_migrations ORDER BY name;");
-  const applied = new Set();
-  for (const part of result) {
-    for (const row of Array.isArray(part?.results) ? part.results : []) {
-      if (typeof row?.name === "string") applied.add(row.name);
-    }
-  }
-  return applied;
+  return new Set(rowsFrom(result).map((row) => row?.name).filter((name) => typeof name === "string"));
 }
 
 async function assertPhase4UnappliedState(config, databaseId, fileName) {
@@ -232,9 +209,73 @@ async function assertPhase4UnappliedState(config, databaseId, fileName) {
   }
 }
 
+function importPath(config, databaseId) {
+  return `/accounts/${encodeURIComponent(config.accountId)}/d1/database/${encodeURIComponent(databaseId)}/import`;
+}
+
+function importError(result) {
+  return typeof result?.error === "string" && result.error ? result.error : null;
+}
+
+async function pollImport(config, databaseId, bookmark) {
+  const path = importPath(config, databaseId);
+  for (let attempt = 0; attempt < 120; attempt += 1) {
+    const payload = await cfJson(config, path, "POST", {
+      action: "poll",
+      current_bookmark: bookmark,
+    });
+    const result = payload?.result;
+    if (result?.status === "complete" && result?.success === true) return result;
+    if (result?.status === "error") {
+      fail(`D1 import failed: ${importError(result) || "unknown import error"}`);
+    }
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 1000));
+  }
+  fail("D1 import did not complete within the polling window.");
+}
+
+async function importSql(config, databaseId, sql, label) {
+  const path = importPath(config, databaseId);
+  const etag = createHash("md5").update(sql).digest("hex");
+
+  const init = await cfJson(config, path, "POST", { action: "init", etag });
+  const uploadUrl = init?.result?.upload_url;
+  const filename = init?.result?.filename;
+  if (typeof uploadUrl !== "string" || !uploadUrl.startsWith("https://")) {
+    fail(`D1 import init for ${label} did not return a valid upload URL.`);
+  }
+  if (typeof filename !== "string" || !filename) {
+    fail(`D1 import init for ${label} did not return a filename.`);
+  }
+
+  const upload = await fetch(uploadUrl, { method: "PUT", body: sql });
+  if (!upload.ok) fail(`D1 import upload for ${label} failed with HTTP ${upload.status}.`);
+  const remoteEtag = (upload.headers.get("etag") || "").replaceAll('"', "");
+  if (remoteEtag && remoteEtag !== etag) {
+    fail(`D1 import upload for ${label} returned an unexpected ETag.`);
+  }
+
+  const ingest = await cfJson(config, path, "POST", {
+    action: "ingest",
+    etag,
+    filename,
+  });
+  const result = ingest?.result;
+  if (result?.status === "complete" && result?.success === true) return;
+  if (result?.status === "error") {
+    fail(`D1 import failed for ${label}: ${importError(result) || "unknown import error"}`);
+  }
+  const bookmark = result?.at_bookmark;
+  if (typeof bookmark !== "string" || !bookmark) {
+    fail(`D1 import ingest for ${label} did not return a bookmark.`);
+  }
+  await pollImport(config, databaseId, bookmark);
+}
+
 async function loadMigration(fileName) {
   const sql = await readFile(resolve(MIGRATIONS_DIR, fileName), "utf8");
-  return splitMigrationSql(sql, fileName);
+  splitMigrationSql(sql, fileName);
+  return sql.trim();
 }
 
 async function checkMigrations() {
@@ -242,8 +283,9 @@ async function checkMigrations() {
   if (!migrationFiles.length) fail("No numbered SQL migrations were found.");
   console.log("Aura migration parser check");
   for (const fileName of migrationFiles) {
-    const statements = await loadMigration(fileName);
-    const triggers = statements.filter((sql) => /^CREATE\s+TRIGGER\b/i.test(sql)).length;
+    const sql = await readFile(resolve(MIGRATIONS_DIR, fileName), "utf8");
+    const statements = splitMigrationSql(sql, fileName);
+    const triggers = statements.filter((statement) => /^CREATE\s+TRIGGER\b/i.test(statement)).length;
     console.log(`  ${fileName}: ${statements.length} statements${triggers ? ` (${triggers} triggers)` : ""}`);
   }
   console.log("Migration parser check passed.");
@@ -263,14 +305,19 @@ async function applyMigrations() {
   for (const fileName of migrationFiles) {
     if (applied.has(fileName)) continue;
     await assertPhase4UnappliedState(config, database.id, fileName);
-    const statements = await loadMigration(fileName);
-    const marker = `INSERT INTO aura_schema_migrations(name, applied_at) VALUES (${sqlString(fileName)}, unixepoch());`;
-    await batchD1(config, database.id, [...statements, marker]);
+
+    const sql = await loadMigration(fileName);
+    const importText = `${sql}\n\nINSERT INTO aura_schema_migrations(name, applied_at) VALUES (${sqlString(fileName)}, unixepoch());\n`;
+    console.log(`Importing migration ${fileName} through D1 SQL import.`);
+    await importSql(config, database.id, importText, fileName);
+
+    const after = await readAppliedMigrations(config, database.id);
+    if (!after.has(fileName)) fail(`D1 import completed but ${fileName} was not recorded as applied.`);
     newlyApplied.push(fileName);
     applied.add(fileName);
   }
 
-  console.log(newlyApplied.length ? `Applied migrations transactionally: ${newlyApplied.join(", ")}.` : "No new migrations to apply.");
+  console.log(newlyApplied.length ? `Applied migrations through D1 SQL import: ${newlyApplied.join(", ")}.` : "No new migrations to apply.");
 }
 
 async function main() {
