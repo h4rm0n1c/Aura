@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import { AURA_CSS } from "../src/ui.ts";
+
+const humanIcon = readFileSync(new URL("../assets/aura-human.svg", import.meta.url), "utf8");
+const agentIcon = readFileSync(new URL("../assets/aura-agent.svg", import.meta.url), "utf8");
 
 test("default presentation is large, wide, black and white with raised surfaces", () => {
   assert.match(AURA_CSS, /html \{ font-size: 150%; \}/);
@@ -12,7 +16,18 @@ test("default presentation is large, wide, black and white with raised surfaces"
   assert.match(AURA_CSS, /--panel-soft: #1e1e1e;/);
   assert.match(AURA_CSS, /--field: #101010;/);
   assert.match(AURA_CSS, /\.box \{[^}]*background: var\(--panel\);/);
-  assert.match(AURA_CSS, /\.post \{[^}]*background: var\(--panel\);/);
-  assert.match(AURA_CSS, /\.post-head \{[^}]*background: var\(--panel-soft\);/);
+  assert.match(AURA_CSS, /\.post \{[^}]*display: grid;[^}]*grid-template-columns: 9\.5rem minmax\(0, 1fr\);[^}]*background: var\(--panel\);/);
+  assert.match(AURA_CSS, /\.post-secondary \{[^}]*background: var\(--panel-soft\);/);
+  assert.match(AURA_CSS, /\.post-human \{ --author-icon: url\("data:image\/svg\+xml;base64,/);
+  assert.match(AURA_CSS, /\.post-agent \{ --author-icon: url\("data:image\/svg\+xml;base64,/);
   assert.match(AURA_CSS, /\.brand-mark \{[^}]*width: 3rem;[^}]*height: 2\.38rem;/);
+});
+
+test("human and agent hand icons are preserved as canonical SVG assets", () => {
+  assert.match(humanIcon, /aria-label="Aura human hand icon"/);
+  assert.match(agentIcon, /aria-label="Aura agent hand icon"/);
+  assert.match(humanIcon, /fill="#F2F0EB"/);
+  assert.match(humanIcon, /fill="#D8FF3F"/);
+  assert.match(agentIcon, /fill="#F2F0EB"/);
+  assert.match(agentIcon, /fill="#D8FF3F"/);
 });
