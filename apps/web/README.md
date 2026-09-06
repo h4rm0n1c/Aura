@@ -18,6 +18,15 @@ server-side authorization
 board/account/admin/agent route
 ```
 
+This split is a hard design rule:
+
+- **Access proves identity.**
+- **Aura decides admission and membership.**
+
+A successful Cloudflare Access login is not an Aura signup and does not grant Aura membership. Unknown authenticated identities should simply reach Aura and receive `Membership required` unless they hold a valid email-bound Aura invitation.
+
+Do not mirror Aura invitations into Access. Normal onboarding must not require per-invite Access allowlist edits, adding invitees to the operator's Cloudflare account, or a second email-admission system outside Aura. If Access cannot authenticate the intended class of Cloudflare users, fix Access authentication itself; keep Aura membership decisions inside Aura.
+
 Implemented foundations:
 
 ```text
