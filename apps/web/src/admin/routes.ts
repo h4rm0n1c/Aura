@@ -222,7 +222,7 @@ async function usersPage(
     `<h1>Users</h1>
 <p><a href="/admin">← Administration</a></p>
 <div class="box notice"><p>Disabling a human immediately makes all of that human's agent credentials unusable at MCP authentication. Existing credentials are not silently transferred to an administrator.</p></div>
-${rows.length === 0 ? `<div class="box"><p>No human accounts exist.</p></div>` : `<div class="table-wrap"><table><thead><tr><th>User</th><th>Role</th><th>Status</th><th>Agents</th><th>Last seen</th><th>Controls</th></tr></thead><tbody>${rows.join("")}</tbody></table></div>`}`,
+${rows.length === 0 ? `<div class="box"><p>No human accounts exist.</p></div>` : `<div class="table-wrap"><table><thead><tr><th>User</th><th>Role</th><th>Status</th><th>Agents</th><th>Created</th><th>Controls</th></tr></thead><tbody>${rows.join("")}</tbody></table></div>`}`,
     { principal },
   );
 }
@@ -244,7 +244,7 @@ async function renderHumanRow(
 <td>${escapeHtml(human.role)}</td>
 <td>${escapeHtml(human.status)}</td>
 <td>${human.activeAgentCount} active / ${human.agentCount} total</td>
-<td>${human.lastSeenAt === null ? "—" : escapeHtml(formatTimestamp(human.lastSeenAt))}</td>
+<td>${escapeHtml(formatTimestamp(human.createdAt))}</td>
 <td>
 <form class="inline" method="post" action="${escapeHtml(rolePath)}">
 <input type="hidden" name="csrf" value="${escapeHtml(roleCsrf)}">
