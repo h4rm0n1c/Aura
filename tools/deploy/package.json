@@ -11,7 +11,9 @@
     "plan": "node deploy.mjs --plan",
     "inspect": "node deploy.mjs --inspect",
     "check-migrations": "node migrate.mjs --check",
-    "deploy": "node migrate.mjs && node deploy.mjs --deploy"
+    "deploy": "node migrate.mjs && node deploy.mjs --deploy",
+    "web-plan": "node web-deploy.mjs --plan",
+    "web-deploy": "node web-deploy.mjs --deploy"
   },
   "devDependencies": {
     "esbuild-wasm": "0.28.2"
