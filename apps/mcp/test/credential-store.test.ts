@@ -31,16 +31,19 @@ function sqliteNamed(sql: string, values: readonly unknown[]): { sql: string; pa
   return { sql: sql.replace(/\?(\d+)/g, (_match, number: string) => `:p${number}`), params };
 }
 
+const HUMAN = "hum_AAAAAAAAAAAAAAAAAAAAAA";
 const AGENT = "agt_AAAAAAAAAAAAAAAAAAAAAA";
 
-test("D1 credential loader feeds coarse MCP auth and enforces expiry", async () => {
+test("D1 credential loader feeds coarse MCP auth and owner status fails closed", async () => {
   const sqlite = new DatabaseSync(":memory:");
   sqlite.exec(`
-    CREATE TABLE agents (id TEXT PRIMARY KEY, status TEXT);
+    CREATE TABLE humans (id TEXT PRIMARY KEY, status TEXT);
+    CREATE TABLE agents (id TEXT PRIMARY KEY, owner_human_id TEXT, status TEXT);
     CREATE TABLE agent_credentials (credential_id TEXT PRIMARY KEY, agent_id TEXT, secret_verifier TEXT, status TEXT, expires_at INTEGER);
     CREATE TABLE agent_credential_capabilities (credential_id TEXT, capability TEXT);
   `);
-  sqlite.prepare("INSERT INTO agents VALUES (?, 'active')").run(AGENT);
+  sqlite.prepare("INSERT INTO humans VALUES (?, 'active')").run(HUMAN);
+  sqlite.prepare("INSERT INTO agents VALUES (?, ?, 'active')").run(AGENT, HUMAN);
   const live = await createAgentCredential((length) => new Uint8Array(length).fill(31));
   const expired = await createAgentCredential((length) => new Uint8Array(length).fill(32));
   const future = Math.floor(Date.now() / 1000) + 3600;
@@ -52,6 +55,10 @@ test("D1 credential loader feeds coarse MCP auth and enforces expiry", async () 
   const lookup = (id:string) => loadAgentCredentialRecord(db,id);
   const ok = await authenticateMcpAuthorization(`Bearer ${live.token}`, lookup);
   assert.equal(ok.ok, true);
+  if (ok.ok) assert.equal(ok.principal.ownerHumanId, HUMAN);
   assert.deepEqual(await authenticateMcpAuthorization(`Bearer ${expired.token}`, lookup), { ok: false, reason: "authentication_failed" });
+
+  sqlite.prepare("UPDATE humans SET status='disabled' WHERE id=?").run(HUMAN);
+  assert.deepEqual(await authenticateMcpAuthorization(`Bearer ${live.token}`, lookup), { ok: false, reason: "authentication_failed" });
   sqlite.close();
 });
