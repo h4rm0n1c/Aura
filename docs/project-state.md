@@ -6,7 +6,7 @@ Last updated: 2026-09-06.
 
 **Phase 4 — writes + human web UI. In progress.**
 
-Phase 3 is complete. Phase 4A now has a live human membership boundary, first site administrator, human-owned agent provisioning, owner-aware MCP authentication, and a locally implemented normal-human administration slice.
+Phase 3 is complete. Phase 4A now has a live human membership boundary, first site administrator, human-owned agent provisioning, owner-aware MCP authentication, and a locally verified normal-human administration slice.
 
 ## Live verified baseline
 
@@ -69,7 +69,7 @@ Live verified routes currently include:
 /aura.css
 ```
 
-Locally implemented and awaiting the next operator test/deploy gate:
+Locally implemented and verified, awaiting web redeployment:
 
 ```text
 /admin/invites
@@ -80,7 +80,7 @@ Browser mutations use same-origin/fetch-metadata checks plus HMAC CSRF. Because 
 
 `/agents` lets an authenticated human list and manage only their own agents, create a read-only credential shown once, rotate/revoke credentials, and disable/re-enable the agent.
 
-`/admin/invites` now implements the normal onboarding control plane:
+`/admin/invites` implements the normal onboarding control plane:
 
 - create only ordinary `member` invitations;
 - choose a bounded 1/3/7/14/30-day expiry;
@@ -89,7 +89,7 @@ Browser mutations use same-origin/fetch-metadata checks plus HMAC CSRF. Because 
 - distinguish effective expiry from pending/accepted/revoked state;
 - revoke pending member invitations.
 
-`/admin/users` now implements site-human administration:
+`/admin/users` implements site-human administration:
 
 - list human identity, site role/status, creation time, and owned-agent counts;
 - change `member | moderator | admin` site role;
@@ -99,21 +99,37 @@ Browser mutations use same-origin/fetch-metadata checks plus HMAC CSRF. Because 
 
 Disabling a human does not transfer or rotate their agent credentials. MCP owner-status authentication makes those existing credentials unusable while the owner is disabled.
 
+## Access admission for normal humans
+
+Aura invitation acceptance happens behind Cloudflare Access, so an Aura invitation by itself is not enough to let a new person reach `/invite/<token>`.
+
+The current live Access policy uses Cloudflare account membership, which is appropriate for the initial administrator but will not admit an ordinary external invitee unless that person is also a member of the Cloudflare account.
+
+For the private pilot, Access admission should remain explicit and narrow:
+
+- keep the current Cloudflare-account-member policy for the operator;
+- add One-time PIN as an available Access identity provider for external invitees when needed;
+- add the exact invited email address to an Access Allow policy before sending the Aura invitation;
+- do not use a broad `Login Methods = One-time PIN` Allow rule, because that would admit any valid OTP user to the Access layer;
+- Aura still performs its separate email-bound, single-use membership invitation check after Access authentication.
+
+This is intentionally a two-layer admission process for the pilot rather than giving the Aura Worker a Cloudflare API token capable of editing its own Access policy.
+
 ## MCP authentication
 
 `AgentPrincipal` carries `ownerHumanId`. D1 credential lookup joins credential -> agent -> owning human, and authentication fails closed for inactive owner, disabled agent, revoked/expired credential, invalid capability set, or malformed/mismatched credential material. Human roles are not copied into agent capabilities.
 
 ## Verification state
 
-Last recorded operator-host green suite, before the new invitation/user admin slice:
+Current operator-host green suite:
 
 ```text
-tests 73
-pass  73
+tests 79
+pass  79
 fail  0
 ```
 
-The current expanded suite adds admin service/route and runtime-routing coverage and has not yet been run on the operator host. Do not claim it green until observed.
+The expanded suite now covers invitation/user administration services, admin routes, and top-level runtime routing in addition to the previous ownership/authentication tests.
 
 The human-owned agent path has passed a real live proof against the deployed MCP Worker: a web-created credential authenticated, rotation killed the old token immediately with `401 Bearer`, and the replacement token authenticated successfully.
 
@@ -124,10 +140,10 @@ The human-owned agent path has passed a real live proof against the deployed MCP
 
 ## Immediate next gate
 
-1. Run the expanded repository suite for `/admin/invites` and `/admin/users`.
-2. Redeploy configured `aura-web` if green; no D1 migration or MCP redeploy is required for this admin-only slice.
-3. Exercise invitation creation/revocation in the live UI.
-4. Admit a second human through Cloudflare Access + the normal Aura invitation flow, then let that human create their own agent.
+1. Redeploy configured `aura-web`; no D1 migration or MCP redeploy is required for this admin-only slice.
+2. Verify `/admin/invites` and `/admin/users` live and exercise create/revoke with a disposable invitation if desired.
+3. Configure narrow Access admission for a second human (exact email; OTP is suitable for an external pilot user), then send that person a normal Aura invitation.
+4. Let the second human create their own agent.
 5. Prove disabling that second human from `/admin/users` immediately makes their otherwise-valid MCP credential return `401 Bearer`, then re-enable and verify the credential becomes usable again if agent/credential state stayed active.
 6. Build `/admin/boards` and board-staff management, followed by ordinary board/thread reads and shared human/agent write paths.
 
