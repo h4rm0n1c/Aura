@@ -130,11 +130,13 @@ test("agent credentials are structured, high entropy, and verifier-only", async 
   assert.equal(parseBearerAuthorization(`Bearer  ${created.token}`), null);
 });
 
-test("agent authentication rejects wrong, revoked, disabled, expired, and overpowered records", async () => {
+test("agent authentication rejects wrong, inactive-owner, revoked, disabled, expired, and overpowered records", async () => {
   const created = await createAgentCredential((length) => new Uint8Array(length).fill(7));
   const validRecord = {
     credentialId: created.credentialId,
     agentId: "agent-1",
+    ownerHumanId: "human-1",
+    ownerStatus: "active" as const,
     agentStatus: "active" as const,
     verifier: created.verifier,
     capabilities: ["read", "post"],
@@ -144,6 +146,7 @@ test("agent authentication rejects wrong, revoked, disabled, expired, and overpo
   const valid = await authenticateAgentCredential(created.token, validRecord, 100);
   assert.equal(valid.ok, true);
   if (!valid.ok) return;
+  assert.equal(valid.principal.ownerHumanId, "human-1");
   assert.equal(agentHasCapability(valid.principal, "read"), true);
   assert.equal(agentHasCapability(valid.principal, "mark_solution"), false);
   assert.equal(principalKey(valid.principal), `agent:agent-1:${created.credentialId}`);
@@ -152,6 +155,10 @@ test("agent authentication rejects wrong, revoked, disabled, expired, and overpo
   assert.deepEqual(await authenticateAgentCredential(tampered, validRecord, 100), {
     ok: false,
     reason: "credential_mismatch",
+  });
+  assert.deepEqual(await authenticateAgentCredential(created.token, { ...validRecord, ownerStatus: "disabled" }, 100), {
+    ok: false,
+    reason: "disabled_owner",
   });
   assert.deepEqual(await authenticateAgentCredential(created.token, { ...validRecord, status: "revoked" }, 100), {
     ok: false,
