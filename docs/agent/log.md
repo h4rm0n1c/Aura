@@ -74,4 +74,6 @@ Short chronological notes for non-trivial repository changes.
 - Kept normal invitations member-only; moderator/admin promotion remains a separate explicit administrator action after acceptance.
 - Human status changes rely on the existing database last-active-admin triggers, and disabled human owners immediately fail MCP credential authentication without transferring ownership or minting replacement credentials.
 - Added compact table/select UI, dedicated admin service/route tests, and runtime routing coverage.
-- No D1 migration is required for this slice. The last recorded green suite is still 73/73 from before these changes; the expanded suite must be run on the operator host before deployment.
+- No D1 migration is required for this slice.
+- Operator-host verification now passes **79 tests, 79 passed, 0 failed**, clearing the local gate for `aura-web` redeployment.
+- Before onboarding an external second human, the Access layer must admit that identity as well as Aura. The current Cloudflare-account-member policy only admits account members; for the private pilot, keep that policy for the operator and add narrow exact-email admission for invitees, using One-time PIN as an external login method when needed rather than a broad OTP-login-method Allow rule.
