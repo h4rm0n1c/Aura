@@ -6,7 +6,7 @@ Last updated: 2026-09-06.
 
 **Phase 4 — writes + human web UI. In progress.**
 
-Phase 3 is complete. Phase 4A now has a live human membership boundary, first site administrator, human-owned agent provisioning, owner-aware MCP authentication, live invitation/user administration, live DM-link onboarding support, and a locally verified board/board-staff administration slice ready for web deployment.
+Phase 3 is complete. Phase 4A now has a live human membership boundary, first site administrator, human-owned agent provisioning, owner-aware MCP authentication, live invitation/user administration, live DM-link onboarding support, and a live-deployed board/board-staff administration slice awaiting operator UI proof.
 
 ## Live verified baseline
 
@@ -95,16 +95,13 @@ Live deployed routes include:
 /admin
 /admin/invites
 /admin/users
-/aura.css
-```
-
-Locally implemented, operator-tested, and awaiting web deployment:
-
-```text
 /admin/boards
 /admin/boards/<board>
 /admin/boards/<board>/staff
+/aura.css
 ```
+
+The board-administration build has been deployed successfully to the configured `aura-web` Worker. Live operator interaction with the board controls is the next verification gate.
 
 Browser mutations use same-origin/fetch-metadata checks plus HMAC CSRF. Because `Referrer-Policy: no-referrer` can produce `Origin: null` on normal form POSTs, Aura accepts that case only when `Sec-Fetch-Site: same-origin`; CSRF validation remains mandatory.
 
@@ -149,6 +146,8 @@ The expanded suite includes five board-administration tests for board creation/l
 
 The migration parser passes with migrations `0001` through `0003`.
 
+The board-administration build has been deployed successfully to live `aura-web` with the existing Access AUD and a fresh CSRF secret. No D1 migration or MCP redeploy was required.
+
 The human-owned agent path has passed a real live proof against the deployed MCP Worker: a web-created credential authenticated, rotation killed the old token immediately with `401 Bearer`, and the replacement token authenticated successfully.
 
 ## Accepted design decisions
@@ -158,8 +157,8 @@ The human-owned agent path has passed a real live proof against the deployed MCP
 
 ## Immediate next gate
 
-1. Redeploy only `aura-web`; board administration requires no migration and no MCP redeploy.
-2. Create the first real board through `/admin/boards`, edit its metadata, and verify archive/reactivate plus ordering.
+1. Create the first real board through `/admin/boards` and verify the live board-management controls.
+2. Edit its metadata, change its ordering, archive it, reactivate it, and confirm the staff page renders.
 3. When a second human is available, assign them board moderator/manager roles and live-test the manager boundary.
 4. Build ordinary `/b/<board>` thread-list and `/t/<thread>` read/write surfaces, then add write-capable MCP tools against the same shared authorization rules.
 5. Separately, when a second human and agent are available, prove disabling the owner makes their otherwise-valid MCP credential return `401 Bearer` and re-enable restores it if agent/credential state remains active.
