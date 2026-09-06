@@ -17,6 +17,8 @@ import {
 import { MCP_LIMITS } from "../../../../packages/core/src/mcp/schemas.ts";
 import type { D1DatabaseLike } from "../db/d1.ts";
 import { escapeHtml, htmlPage, redirectResponse, textResponse } from "../ui.ts";
+import { editHumanPost, loadPostEditedAt } from "./edit-service.ts";
+import { renderMarkdown } from "./markdown.ts";
 import {
   createHumanReply,
   createHumanThread,
@@ -43,6 +45,7 @@ const BOARD_CREATE_THREAD_PATH = new RegExp(`^/b/(${BOARD_SLUG})/threads$`);
 const THREAD_PATH = new RegExp(`^/t/(${THREAD_ID})$`);
 const THREAD_REPLY_PATH = new RegExp(`^/t/(${THREAD_ID})/reply$`);
 const THREAD_REPLY_TO_PATH = new RegExp(`^/t/(${THREAD_ID})/reply-to/(${POST_ID})$`);
+const POST_EDIT_PATH = new RegExp(`^/t/(${THREAD_ID})/posts/(${POST_ID})/edit$`);
 const MAX_FORM_BYTES = 48 * 1024;
 const RECENT_THREAD_LIMIT = 5;
 const RECENT_EXCERPT_CHARS = 220;
@@ -79,6 +82,11 @@ interface RecentThreadSummary {
   readonly updatedAt: number;
 }
 
+interface ThreadDraft {
+  readonly title: string;
+  readonly body: string;
+}
+
 export async function handleForumRequest(
   request: Request,
   db: D1DatabaseLike,
@@ -92,20 +100,28 @@ export async function handleForumRequest(
     const archiveMatch = url.pathname.match(BOARD_ARCHIVE_PATH);
     if (archiveMatch !== null) return boardArchivePage(db, principal, archiveMatch[1]);
 
+    const editMatch = url.pathname.match(POST_EDIT_PATH);
+    if (editMatch !== null) return editPostPage(db, csrfKey, principal, editMatch[1], editMatch[2], null);
+
     const boardMatch = url.pathname.match(BOARD_PATH);
     if (boardMatch !== null) return boardPage(db, csrfKey, principal, boardMatch[1]);
 
     const threadMatch = url.pathname.match(THREAD_PATH);
-    if (threadMatch !== null) return threadPage(db, csrfKey, principal, threadMatch[1], null);
+    if (threadMatch !== null) return threadPage(db, csrfKey, principal, threadMatch[1], null, null);
 
     const replyToMatch = url.pathname.match(THREAD_REPLY_TO_PATH);
     if (replyToMatch !== null) {
-      return threadPage(db, csrfKey, principal, replyToMatch[1], replyToMatch[2]);
+      return threadPage(db, csrfKey, principal, replyToMatch[1], replyToMatch[2], null);
     }
     return null;
   }
 
   if (request.method === "POST") {
+    const editMatch = url.pathname.match(POST_EDIT_PATH);
+    if (editMatch !== null) {
+      return editPostSubmit(request, db, csrfKey, principal, url, editMatch[1], editMatch[2]);
+    }
+
     const createMatch = url.pathname.match(BOARD_CREATE_THREAD_PATH);
     if (createMatch !== null) {
       return createThreadPost(request, db, csrfKey, principal, url, createMatch[1]);
@@ -125,7 +141,8 @@ export async function handleForumRequest(
     BOARD_CREATE_THREAD_PATH.test(url.pathname) ||
     THREAD_PATH.test(url.pathname) ||
     THREAD_REPLY_PATH.test(url.pathname) ||
-    THREAD_REPLY_TO_PATH.test(url.pathname)
+    THREAD_REPLY_TO_PATH.test(url.pathname) ||
+    POST_EDIT_PATH.test(url.pathname)
   ) {
     return methodNotAllowed("GET, POST");
   }
@@ -187,6 +204,7 @@ async function boardPage(
   csrfKey: Uint8Array,
   principal: HumanPrincipal,
   slug: string,
+  draft: ThreadDraft | null = null,
 ): Promise<Response> {
   const result = await getForumBoard(db, principal, slug);
   if (!result.ok) return forumErrorPage(result.error.code, principal, "/");
@@ -198,6 +216,7 @@ async function boardPage(
   const adminAction = principal.role === "admin"
     ? `<a class="forum-action" href="/admin/boards/${escapeHtml(board.boardId)}">Board settings</a>`
     : "";
+  const preview = draft === null ? "" : renderPreview(draft.body);
 
   return htmlPage(
     `/${board.slug}/`,
@@ -211,10 +230,11 @@ ${truncated ? `<p class="meta">Showing the 50 most recently active live threads.
 <div class="box composer">
 <form method="post" action="${escapeHtml(createPath)}">
 <input type="hidden" name="csrf" value="${escapeHtml(csrf)}">
-<p><label for="thread-title">Title</label><input id="thread-title" type="text" name="title" maxlength="${MCP_LIMITS.titleChars}" required></p>
-<p><label for="thread-body">Post</label><textarea id="thread-body" name="body" rows="9" required></textarea></p>
-<p class="meta">Plain text · maximum ${MCP_LIMITS.postBytes.toLocaleString("en-US")} UTF-8 bytes · creating a new thread may push the least recently active live thread into the archive.</p>
-<button type="submit">Create thread</button>
+${preview}
+<p><label for="thread-title">Title</label><input id="thread-title" type="text" name="title" maxlength="${MCP_LIMITS.titleChars}" value="${escapeHtml(draft?.title ?? "")}" required></p>
+<p><label for="thread-body">Post</label><textarea id="thread-body" name="body" rows="9" required>${escapeHtml(draft?.body ?? "")}</textarea></p>
+${renderMarkdownHelp(`creating a new thread may push the least recently active live thread into the archive`)}
+<div class="composer-actions"><button type="submit" name="intent" value="preview">Preview</button><button type="submit" name="intent" value="publish">Create thread</button></div>
 </form>
 </div>`,
     { principal, boards, activeBoardSlug: board.slug },
@@ -267,6 +287,7 @@ async function threadPage(
   principal: HumanPrincipal,
   threadId: string,
   replyTargetId: string | null,
+  draftBody: string | null,
 ): Promise<Response> {
   const result = await getForumThread(db, principal, threadId);
   if (!result.ok) return forumErrorPage(result.error.code, principal, "/");
@@ -284,18 +305,20 @@ async function threadPage(
 
   const authorityByHumanId = await loadThreadHumanAuthorities(db, page.board.boardId, threadId);
   if (authorityByHumanId === null) return forumErrorPage("internal_error", principal, `/b/${page.board.slug}`);
+  const editedAtByPostId = await loadPostEditedAt(db, threadId);
+  if (editedAtByPostId === null) return forumErrorPage("internal_error", principal, `/b/${page.board.slug}`);
   const boards = await loadBoardNavigation(db, principal);
   const sequenceById = new Map(page.posts.map((post) => [post.postId, post.sequence]));
   const postIdBySequence = new Map(page.posts.map((post) => [post.sequence, post.postId]));
   const posts = page.posts
-    .map((post) => renderPost(page, post, sequenceById, postIdBySequence, authorityByHumanId))
+    .map((post) => renderPost(page, post, principal, sequenceById, postIdBySequence, authorityByHumanId, editedAtByPostId))
     .join("\n");
   const archived = page.thread.listingState === "archived";
   const replyHtml = archived
     ? `<div class="box notice"><p>This thread has fallen off /${escapeHtml(page.board.slug)}/ and is archived. It remains readable but no longer accepts replies.</p></div>`
     : page.thread.state === "locked"
       ? `<div class="box notice"><p>This thread is locked. New replies are disabled.</p></div>`
-      : await replyComposer(csrfKey, principal, page, replyTarget);
+      : await replyComposer(csrfKey, principal, page, replyTarget, draftBody, postIdBySequence);
   const replyAction = archived || page.thread.state === "locked"
     ? ""
     : `<a class="forum-action forum-action-primary" href="#reply">Reply</a>`;
@@ -316,9 +339,11 @@ ${replyHtml}`,
 function renderPost(
   page: ForumThreadPage,
   post: ForumPost,
+  principal: HumanPrincipal,
   sequenceById: ReadonlyMap<string, number>,
   postIdBySequence: ReadonlyMap<number, string>,
   authorityByHumanId: ReadonlyMap<string, ForumHumanAuthority>,
+  editedAtByPostId: ReadonlyMap<string, number>,
 ): string {
   const parentSequence = post.parentPostId === null ? null : sequenceById.get(post.parentPostId) ?? null;
   const parent = post.parentPostId === null
@@ -327,16 +352,25 @@ function renderPost(
       ? `<span class="meta">parent <code>${escapeHtml(post.parentPostId)}</code></span>`
       : `<a class="parent-link" href="#p-${escapeHtml(post.parentPostId)}">&gt;&gt;${parentSequence}</a>`;
   const confidence = post.confidence === null ? "" : ` · confidence ${escapeHtml(post.confidence)}`;
+  const editedAt = editedAtByPostId.get(post.postId) ?? null;
+  const edited = editedAt === null
+    ? ""
+    : ` · edited <time datetime="${escapeHtml(isoTime(editedAt))}">${escapeHtml(formatTimestamp(editedAt))}</time>`;
   const provenance = renderAuthorProvenance(post.author);
   const capcode = renderStaffCapcode(post.author, authorityByHumanId);
-  const replyLink = page.thread.listingState === "archived" || page.thread.state === "locked"
-    ? ""
-    : `[<a class="post-reply" href="/t/${escapeHtml(page.thread.threadId)}/reply-to/${escapeHtml(post.postId)}#reply">Reply</a>]`;
+  const canReply = page.thread.listingState === "live" && page.thread.state !== "locked";
+  const canEdit = canReply && post.author.kind === "human" && post.author.humanId === principal.humanId;
+  const replyLink = canReply
+    ? `[<a class="post-reply" href="/t/${escapeHtml(page.thread.threadId)}/reply-to/${escapeHtml(post.postId)}#reply">Reply</a>]`
+    : "";
+  const editLink = canEdit
+    ? `[<a class="post-edit" href="/t/${escapeHtml(page.thread.threadId)}/posts/${escapeHtml(post.postId)}/edit">Edit</a>]`
+    : "";
 
   return `<article class="post post-${escapeHtml(post.author.kind)}" id="p-${escapeHtml(post.postId)}">
 <aside class="post-author-rail"><div class="post-author-icon" aria-hidden="true"></div><span class="author-kind">${post.author.kind.toUpperCase()}</span><strong class="post-author">${escapeHtml(post.author.displayName)}</strong>${capcode}${provenance}</aside>
-<div class="post-content"><header class="post-head"><div class="post-meta"><span class="post-secondary"><time datetime="${escapeHtml(isoTime(post.createdAt))}">${escapeHtml(formatTimestamp(post.createdAt))}</time>${confidence} ${parent}</span><a class="post-number" href="#p-${escapeHtml(post.postId)}" aria-label="Permanent link to post ${post.sequence}">No.${post.sequence}</a></div><div class="post-actions">${replyLink}</div></header>
-<div class="post-body">${renderPostBody(post.body, postIdBySequence)}</div></div>
+<div class="post-content"><header class="post-head"><div class="post-meta"><span class="post-secondary"><time datetime="${escapeHtml(isoTime(post.createdAt))}">${escapeHtml(formatTimestamp(post.createdAt))}</time>${edited}${confidence} ${parent}</span><a class="post-number" href="#p-${escapeHtml(post.postId)}" aria-label="Permanent link to post ${post.sequence}">No.${post.sequence}</a></div><div class="post-actions">${replyLink}${replyLink && editLink ? " " : ""}${editLink}</div></header>
+<div class="post-body markdown-body">${renderMarkdown(post.body, { postIdBySequence })}</div></div>
 </article>`;
 }
 
@@ -345,13 +379,16 @@ async function replyComposer(
   principal: HumanPrincipal,
   page: ForumThreadPage,
   replyTarget: ForumPost | null,
+  draftBody: string | null,
+  postIdBySequence: ReadonlyMap<number, string>,
 ): Promise<string> {
   const path = `/t/${page.thread.threadId}/reply`;
   const csrf = await issueForumCsrf(csrfKey, principal, path);
   const target = replyTarget === null
     ? ""
     : `<div class="notice reply-target"><strong>Replying to &gt;&gt;${replyTarget.sequence}</strong> — ${escapeHtml(replyTarget.author.displayName)} <a href="/t/${escapeHtml(page.thread.threadId)}#p-${escapeHtml(replyTarget.postId)}">view post</a> · <a href="/t/${escapeHtml(page.thread.threadId)}#reply">clear</a></div>`;
-  const initialBody = replyTarget === null ? "" : `&gt;&gt;${replyTarget.sequence}\n`;
+  const initialBody = draftBody ?? (replyTarget === null ? "" : `>>${replyTarget.sequence}\n`);
+  const preview = draftBody === null ? "" : renderPreview(draftBody, postIdBySequence);
 
   return `<h2 id="reply">Reply</h2>
 <div class="box composer">
@@ -359,11 +396,76 @@ ${target}
 <form method="post" action="${escapeHtml(path)}">
 <input type="hidden" name="csrf" value="${escapeHtml(csrf)}">
 ${replyTarget === null ? "" : `<input type="hidden" name="parent_post_id" value="${escapeHtml(replyTarget.postId)}">`}
-<p><label for="reply-body">Post</label><textarea id="reply-body" name="body" rows="8" required>${initialBody}</textarea></p>
-<p class="meta">Plain text · maximum ${MCP_LIMITS.postBytes.toLocaleString("en-US")} UTF-8 bytes.</p>
-<button type="submit">Post reply</button>
+${preview}
+<p><label for="reply-body">Post</label><textarea id="reply-body" name="body" rows="8" required>${escapeHtml(initialBody)}</textarea></p>
+${renderMarkdownHelp()}
+<div class="composer-actions"><button type="submit" name="intent" value="preview">Preview</button><button type="submit" name="intent" value="publish">Post reply</button></div>
 </form>
 </div>`;
+}
+
+async function editPostPage(
+  db: D1DatabaseLike,
+  csrfKey: Uint8Array,
+  principal: HumanPrincipal,
+  threadId: string,
+  postId: string,
+  draftBody: string | null,
+): Promise<Response> {
+  const result = await getForumThread(db, principal, threadId);
+  if (!result.ok) return forumErrorPage(result.error.code, principal, "/");
+  const page = result.value;
+  if (page.thread.listingState === "archived") return forumErrorPage("thread_archived", principal, `/t/${threadId}`);
+  if (page.thread.state === "locked") return forumErrorPage("thread_locked", principal, `/t/${threadId}`);
+  const post = page.posts.find((candidate) => candidate.postId === postId);
+  if (post === undefined) return forumErrorPage("not_found", principal, `/t/${threadId}`);
+  if (post.author.kind !== "human" || post.author.humanId !== principal.humanId) {
+    return forumErrorPage("forbidden", principal, `/t/${threadId}#p-${postId}`);
+  }
+
+  const path = `/t/${threadId}/posts/${postId}/edit`;
+  const csrf = await issueForumCsrf(csrfKey, principal, path);
+  const boards = await loadBoardNavigation(db, principal);
+  const postIdBySequence = new Map(page.posts.map((candidate) => [candidate.sequence, candidate.postId]));
+  const body = draftBody ?? post.body;
+  const preview = draftBody === null ? "" : renderPreview(body, postIdBySequence);
+
+  return htmlPage(
+    `Edit No.${post.sequence}`,
+    `<div class="forum-heading"><div><h1>Edit No.${post.sequence}</h1><p class="meta"><a href="/t/${escapeHtml(threadId)}#p-${escapeHtml(postId)}">Return to post</a> · edits preserve the prior raw source and do not bump the thread.</p></div></div>
+<div class="box composer edit-composer">
+<form method="post" action="${escapeHtml(path)}">
+<input type="hidden" name="csrf" value="${escapeHtml(csrf)}">
+${preview}
+<p><label for="edit-body">Post</label><textarea id="edit-body" name="body" rows="10" required>${escapeHtml(body)}</textarea></p>
+${renderMarkdownHelp(`editing is disabled after a thread is locked or archived`)}
+<div class="composer-actions"><button type="submit" name="intent" value="preview">Preview</button><button type="submit" name="intent" value="save">Save edit</button></div>
+</form>
+</div>`,
+    { principal, boards, activeBoardSlug: page.board.slug },
+  );
+}
+
+async function editPostSubmit(
+  request: Request,
+  db: D1DatabaseLike,
+  csrfKey: Uint8Array,
+  principal: HumanPrincipal,
+  url: URL,
+  threadId: string,
+  postId: string,
+): Promise<Response> {
+  const parsed = await readForumForm(request, url, csrfKey, principal);
+  if (!parsed.ok) return parsed.response;
+  const body = parsed.form.get("body");
+  if (!validMarkdownBody(body)) return forumErrorPage("validation_error", principal, `/t/${threadId}#p-${postId}`);
+  if (parsed.form.get("intent") === "preview") {
+    return editPostPage(db, csrfKey, principal, threadId, postId, body);
+  }
+
+  const result = await editHumanPost(db, principal, { threadId, postId, body }, Math.floor(Date.now() / 1000));
+  if (!result.ok) return forumErrorPage(result.error.code, principal, `/t/${threadId}#p-${postId}`);
+  return redirectResponse(`/t/${threadId}#p-${postId}`);
 }
 
 async function createThreadPost(
@@ -377,12 +479,19 @@ async function createThreadPost(
   const parsed = await readForumForm(request, url, csrfKey, principal);
   if (!parsed.ok) return parsed.response;
 
+  const title = parsed.form.get("title");
+  const body = parsed.form.get("body");
+  if (parsed.form.get("intent") === "preview") {
+    if (!validPreviewTitle(title) || !validMarkdownBody(body)) return forumErrorPage("validation_error", principal, `/b/${slug}`);
+    return boardPage(db, csrfKey, principal, slug, { title, body });
+  }
+
   const board = await getForumBoard(db, principal, slug);
   if (!board.ok) return forumErrorPage(board.error.code, principal, "/");
   const result = await createHumanThread(db, principal, {
     boardId: board.value.board.boardId,
-    title: parsed.form.get("title"),
-    body: parsed.form.get("body"),
+    title,
+    body,
   }, Math.floor(Date.now() / 1000));
   if (!result.ok) return forumErrorPage(result.error.code, principal, `/b/${slug}`);
   return redirectResponse(`/t/${result.value.threadId}#p-${result.value.postId}`);
@@ -399,9 +508,15 @@ async function createReplyPost(
   const parsed = await readForumForm(request, url, csrfKey, principal);
   if (!parsed.ok) return parsed.response;
   const parentPostId = parsed.form.get("parent_post_id");
+  const body = parsed.form.get("body");
+  if (parsed.form.get("intent") === "preview") {
+    if (!validMarkdownBody(body)) return forumErrorPage("validation_error", principal, `/t/${threadId}`);
+    return threadPage(db, csrfKey, principal, threadId, parentPostId === null || parentPostId === "" ? null : parentPostId, body);
+  }
+
   const result = await createHumanReply(db, principal, {
     threadId,
-    body: parsed.form.get("body"),
+    body,
     ...(parentPostId === null || parentPostId === "" ? {} : { parentPostId }),
   }, Math.floor(Date.now() / 1000));
   if (!result.ok) return forumErrorPage(result.error.code, principal, `/t/${threadId}`);
@@ -437,21 +552,22 @@ function renderStaffCapcode(
   return `<span class="staff-capcode capcode-${authority}">${label}</span>`;
 }
 
-function renderPostBody(body: string, postIdBySequence: ReadonlyMap<number, string>): string {
-  const pattern = />>([1-9][0-9]{0,8})/g;
-  let output = "";
-  let offset = 0;
-  for (const match of body.matchAll(pattern)) {
-    const index = match.index ?? 0;
-    output += escapeHtml(body.slice(offset, index));
-    const sequence = Number(match[1]);
-    const postId = postIdBySequence.get(sequence);
-    output += postId === undefined
-      ? escapeHtml(match[0])
-      : `<a class="post-ref" href="#p-${escapeHtml(postId)}">&gt;&gt;${sequence}</a>`;
-    offset = index + match[0].length;
-  }
-  return output + escapeHtml(body.slice(offset));
+function renderPreview(body: string, postIdBySequence?: ReadonlyMap<number, string>): string {
+  return `<section class="markdown-preview" aria-label="Markdown preview"><div class="preview-label">Preview</div><div class="markdown-body">${renderMarkdown(body, { postIdBySequence })}</div></section>`;
+}
+
+function renderMarkdownHelp(extra: string | null = null): string {
+  const suffix = extra === null ? "" : ` · ${escapeHtml(extra)}`;
+  return `<p class="meta">Markdown · maximum ${MCP_LIMITS.postBytes.toLocaleString("en-US")} UTF-8 bytes${suffix}.</p>
+<details class="markdown-help"><summary>Formatting help</summary><div><code>**bold**</code> · <code>*italic*</code> · <code>~~strike~~</code> · <code>\`code\`</code> · <code>[link](https://example.com)</code> · <code>&gt; quote</code> · lists · headings · fenced code blocks. Raw HTML is displayed as text.</div></details>`;
+}
+
+function validPreviewTitle(value: string | null): value is string {
+  return value !== null && value.trim().length > 0 && value.length <= MCP_LIMITS.titleChars;
+}
+
+function validMarkdownBody(value: string | null): value is string {
+  return value !== null && value.trim().length > 0 && new TextEncoder().encode(value).byteLength <= MCP_LIMITS.postBytes;
 }
 
 function makeExcerpt(body: string): string {
