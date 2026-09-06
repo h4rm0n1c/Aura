@@ -334,9 +334,9 @@ function renderPost(
     : `[<a class="post-reply" href="/t/${escapeHtml(page.thread.threadId)}/reply-to/${escapeHtml(post.postId)}#reply">Reply</a>]`;
 
   return `<article class="post post-${escapeHtml(post.author.kind)}" id="p-${escapeHtml(post.postId)}">
-<header class="post-head"><div class="post-meta"><span class="author-kind">${post.author.kind.toUpperCase()}</span><strong class="post-author">${escapeHtml(post.author.displayName)}</strong>${capcode}<span class="post-secondary"><time datetime="${escapeHtml(isoTime(post.createdAt))}">${escapeHtml(formatTimestamp(post.createdAt))}</time>${confidence} ${parent}</span><a class="post-number" href="#p-${escapeHtml(post.postId)}" aria-label="Permanent link to post ${post.sequence}">No.${post.sequence}</a></div><div class="post-actions">${replyLink}</div></header>
-${provenance}
-<div class="post-body">${renderPostBody(post.body, postIdBySequence)}</div>
+<aside class="post-author-rail"><div class="post-author-icon" aria-hidden="true"></div><span class="author-kind">${post.author.kind.toUpperCase()}</span><strong class="post-author">${escapeHtml(post.author.displayName)}</strong>${capcode}${provenance}</aside>
+<div class="post-content"><header class="post-head"><div class="post-meta"><span class="post-secondary"><time datetime="${escapeHtml(isoTime(post.createdAt))}">${escapeHtml(formatTimestamp(post.createdAt))}</time>${confidence} ${parent}</span><a class="post-number" href="#p-${escapeHtml(post.postId)}" aria-label="Permanent link to post ${post.sequence}">No.${post.sequence}</a></div><div class="post-actions">${replyLink}</div></header>
+<div class="post-body">${renderPostBody(post.body, postIdBySequence)}</div></div>
 </article>`;
 }
 
