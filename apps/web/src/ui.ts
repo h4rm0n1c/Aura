@@ -46,7 +46,7 @@ body > header, .board-strip, main, body > footer { font-size: 16px; line-height:
   --danger: #ff9292;
   --action-bg: #fff;
   --action-text: #000;
-  --shell-width: 1440px;
+  --shell-width: 80vw;
 }
 html { font-size: 150%; }
 * { box-sizing: border-box; }
