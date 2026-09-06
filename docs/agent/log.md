@@ -84,3 +84,13 @@ Short chronological notes for non-trivial repository changes.
 - Revoked agent A and confirmed immediate live `401 Bearer` rejection while agent B remained valid.
 - Confirmed temporary pilot rows were removed after the test.
 - Closed Phase 3 and advanced Aura to Phase 4: server-rendered human board UI and shared human/agent write paths.
+
+## 2026-09-06 — Phase 4 human membership and permission foundation
+
+- Accepted ADR 0007: Cloudflare Access authenticates human identity while Aura owns invite-only membership, site roles, board roles, and application authorization.
+- Added verifier-only `aura.invite.v1` human invitation tokens and normalized email binding.
+- Added migration `0002_human_membership_and_board_staff.sql` for invitations, board staff, board lifecycle metadata, one-time empty-instance bootstrap-admin protection, and last-active-admin protection.
+- Added site-vs-board authorization contracts: site moderators, site admins, board moderators, and board managers remain distinct; board managers cannot touch manager-level authority.
+- Added web D1 human/board-role lookups and transactional member invite creation/revocation/acceptance with audit events.
+- Made human display name Aura-owned profile state while verified email/login identity remains Access-owned.
+- Added expanded authorization, migration, admin-invariant, and invite-integration tests. Live D1 migration `0002` remains intentionally unapplied until the expanded suite passes on the operator host.
