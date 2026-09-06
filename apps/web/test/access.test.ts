@@ -64,13 +64,14 @@ test("web auth binds verified Access id to Aura record and rejects disabled user
   const access = {
     aud: "aura-web-aud",
     async getIdentity(): Promise<unknown> {
-      return { id: "cf-id-2", email: "member@example.test", role: "admin" };
+      return { id: "cf-id-2", email: "member@example.test", name: "Provider Name", role: "admin" };
     },
   };
   const record = {
     humanId: "human-2",
     provider: "cloudflare_access" as const,
     providerId: "cf-id-2",
+    displayName: "Aura Name",
     role: "member" as const,
     status: "active" as const,
   };
@@ -79,6 +80,7 @@ test("web auth binds verified Access id to Aura record and rejects disabled user
   assert.equal(ok.ok, true);
   if (!ok.ok) return;
   assert.equal(ok.principal.role, "member");
+  assert.equal(ok.principal.displayName, "Aura Name");
 
   assert.deepEqual(
     await authenticateWebAccess(access, "aura-web-aud", async () => ({
