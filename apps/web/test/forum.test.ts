@@ -8,6 +8,7 @@ import {
   createHumanReply,
   createHumanThread,
   getForumBoard,
+  getForumBoardArchive,
   getForumThread,
   listForumBoards,
 } from "../src/forum/service.ts";
@@ -18,6 +19,7 @@ import { AURA_CSS } from "../src/ui.ts";
 const migration1 = readFileSync(new URL("../../../db/migrations/0001_initial.sql", import.meta.url), "utf8");
 const migration2 = readFileSync(new URL("../../../db/migrations/0002_human_membership_and_board_staff.sql", import.meta.url), "utf8");
 const migration3 = readFileSync(new URL("../../../db/migrations/0003_unbound_member_invites.sql", import.meta.url), "utf8");
+const migration4 = readFileSync(new URL("../../../db/migrations/0004_board_thread_lifecycle.sql", import.meta.url), "utf8");
 
 const ADMIN = "hum_AAAAAAAAAAAAAAAAAAAAAA";
 const MEMBER = "hum_BBBBBBBBBBBBBBBBBBBBBB";
@@ -69,6 +71,7 @@ class DatabaseAdapter implements D1DatabaseLike {
     this.sqlite.exec(migration1);
     this.sqlite.exec(migration2);
     this.sqlite.exec(migration3);
+    this.sqlite.exec(migration4);
   }
 
   prepare(query: string): D1PreparedStatementLike {
@@ -128,7 +131,7 @@ async function createThread(db: DatabaseAdapter, principal: HumanPrincipal, titl
   return created.value;
 }
 
-test("forum board index exposes active boards with useful thread counts", async () => {
+test("forum board index exposes active boards with useful thread counts and latest-post teasers", async () => {
   const db = new DatabaseAdapter();
   const member = seedHuman(db, MEMBER, "member");
   seedBoards(db);
@@ -149,6 +152,8 @@ test("forum board index exposes active boards with useful thread counts", async 
   assert.equal(boards.value[0].slug, "general");
   assert.equal(boards.value[0].threadCount, 6);
   assert.equal(boards.value[0].openThreadCount, 6);
+  assert.equal(boards.value[0].archiveCount, 0);
+  assert.equal(boards.value[0].maxThreads, 100);
 
   const page = await getForumBoard(db, member, "general");
   assert.equal(page.ok, true);
@@ -171,11 +176,78 @@ test("forum board index exposes active boards with useful thread counts", async 
   assert.match(indexHtml, /<h2>All boards<\/h2>/);
   assert.equal((indexHtml.match(/class="recent-thread-cell"/g) ?? []).length, 5);
   assert.match(indexHtml, /Thread 6/);
+  assert.match(indexHtml, /Body 6/);
   assert.match(indexHtml, /Thread 2/);
   assert.doesNotMatch(indexHtml, /First thread/);
   assert.ok(indexHtml.indexOf("Recent threads") < indexHtml.indexOf("All boards"));
+  assert.match(indexHtml, />6\/100<\/td>/);
   assert.match(AURA_CSS, /--shell-width: 1240px/);
+  assert.match(AURA_CSS, /font-family: Arial, Helvetica, sans-serif/);
+  assert.match(AURA_CSS, /body \{[^}]*font-size: 14px;[^}]*line-height: 1\.38;/);
   assert.match(AURA_CSS, /\.board-strip-track \{ width: max-content; white-space: nowrap; text-align: left; \}/);
+  db.close();
+});
+
+test("per-board capacity drops old threads into a durable read-only archive", async () => {
+  const db = new DatabaseAdapter();
+  const member = seedHuman(db, MEMBER, "member", "member", "Human User");
+  seedBoards(db);
+  db.sqlite.prepare("UPDATE boards SET max_threads=2 WHERE id=?").run(BOARD);
+
+  const first = await createHumanThread(db, member, { boardId: BOARD, title: "Oldest", body: "Oldest body" }, 100);
+  const second = await createHumanThread(db, member, { boardId: BOARD, title: "Middle", body: "Middle body" }, 101);
+  const newest = await createHumanThread(db, member, { boardId: BOARD, title: "Newest", body: "Newest body" }, 102);
+  assert(first.ok && second.ok && newest.ok);
+  if (!first.ok || !second.ok || !newest.ok) return db.close();
+
+  const board = await getForumBoard(db, member, "general");
+  assert(board.ok);
+  if (!board.ok) return db.close();
+  assert.deepEqual(board.value.threads.map((thread) => thread.title), ["Newest", "Middle"]);
+  assert.equal(board.value.board.threadCount, 2);
+  assert.equal(board.value.board.archiveCount, 1);
+
+  const archive = await getForumBoardArchive(db, member, "general");
+  assert(archive.ok);
+  if (!archive.ok) return db.close();
+  assert.equal(archive.value.threads.length, 1);
+  assert.equal(archive.value.threads[0].threadId, first.value.threadId);
+  assert.equal(archive.value.threads[0].listingState, "archived");
+
+  const durable = await getForumThread(db, member, first.value.threadId);
+  assert(durable.ok);
+  if (durable.ok) assert.equal(durable.value.posts[0].body, "Oldest body");
+
+  const refused = await createHumanReply(db, member, { threadId: first.value.threadId, body: "Too late" }, 103);
+  assert.equal(refused.ok, false);
+  if (!refused.ok) assert.equal(refused.error.code, "thread_archived");
+
+  const archiveResponse = await handleForumRequest(
+    new Request("https://aura.example/b/general/archive"),
+    db,
+    new Uint8Array(32).fill(5),
+    member,
+    new URL("https://aura.example/b/general/archive"),
+  );
+  assert(archiveResponse);
+  assert.equal(archiveResponse.status, 200);
+  const archiveHtml = await archiveResponse.text();
+  assert.match(archiveHtml, /Oldest/);
+  assert.match(archiveHtml, /durable and read-only/);
+
+  const threadResponse = await handleForumRequest(
+    new Request(`https://aura.example/t/${first.value.threadId}`),
+    db,
+    new Uint8Array(32).fill(5),
+    member,
+    new URL(`https://aura.example/t/${first.value.threadId}`),
+  );
+  assert(threadResponse);
+  assert.equal(threadResponse.status, 200);
+  const threadHtml = await threadResponse.text();
+  assert.match(threadHtml, /is archived/);
+  assert.doesNotMatch(threadHtml, /href="#reply">Reply<\/a>/);
+  assert.doesNotMatch(threadHtml, /<h2 id="reply">Reply<\/h2>/);
   db.close();
 });
 
@@ -289,6 +361,7 @@ test("forum HTML forms create a thread and reply with CSRF and PRG redirects", a
   const boardHtml = await boardGet.text();
   assert.match(boardHtml, /Start a thread/);
   assert.match(boardHtml, /href="#new-thread">Start thread<\/a>/);
+  assert.match(boardHtml, /href="\/b\/general\/archive">Archive<\/a>/);
   assert.match(boardHtml, /class="board-strip"/);
   assert.match(boardHtml, /href="\/b\/general"[^>]*>\/general\/<\/a>/);
   const createCsrf = /name="csrf" value="([^"]+)"/.exec(boardHtml)?.[1];
