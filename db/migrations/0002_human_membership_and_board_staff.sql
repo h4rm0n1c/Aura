@@ -46,45 +46,14 @@ CREATE UNIQUE INDEX idx_human_invites_pending_bootstrap
     WHERE kind = 'bootstrap_admin' AND status = 'pending';
 
 -- A bootstrap-admin invitation is a one-time empty-instance escape hatch.
--- After any human exists, even a manually issued SQL insert must fail.
-CREATE TRIGGER trg_human_invites_bootstrap_empty
-BEFORE INSERT ON human_invites
-WHEN NEW.kind = 'bootstrap_admin'
-BEGIN
-    SELECT CASE
-        WHEN EXISTS(SELECT 1 FROM humans)
-        THEN RAISE(ABORT, 'bootstrap_admin_requires_empty_instance')
-    END;
-END;
+-- Keep trigger definitions on one physical line: remote D1's SQL-file parser has
+-- historically returned "incomplete input" for multiline CREATE TRIGGER bodies.
+CREATE TRIGGER trg_human_invites_bootstrap_empty BEFORE INSERT ON human_invites WHEN NEW.kind = 'bootstrap_admin' BEGIN SELECT CASE WHEN EXISTS(SELECT 1 FROM humans) THEN RAISE(ABORT, 'bootstrap_admin_requires_empty_instance') END; END;
 
 -- Never permit a role/status mutation to remove the final active site admin.
-CREATE TRIGGER trg_humans_keep_last_active_admin_update
-BEFORE UPDATE OF role, status ON humans
-WHEN OLD.role = 'admin'
- AND OLD.status = 'active'
- AND (NEW.role <> 'admin' OR NEW.status <> 'active')
-BEGIN
-    SELECT CASE
-        WHEN NOT EXISTS(
-            SELECT 1 FROM humans
-            WHERE id <> OLD.id AND role = 'admin' AND status = 'active'
-        )
-        THEN RAISE(ABORT, 'last_active_admin_required')
-    END;
-END;
+CREATE TRIGGER trg_humans_keep_last_active_admin_update BEFORE UPDATE OF role, status ON humans WHEN OLD.role = 'admin' AND OLD.status = 'active' AND (NEW.role <> 'admin' OR NEW.status <> 'active') BEGIN SELECT CASE WHEN NOT EXISTS(SELECT 1 FROM humans WHERE id <> OLD.id AND role = 'admin' AND status = 'active') THEN RAISE(ABORT, 'last_active_admin_required') END; END;
 
-CREATE TRIGGER trg_humans_keep_last_active_admin_delete
-BEFORE DELETE ON humans
-WHEN OLD.role = 'admin' AND OLD.status = 'active'
-BEGIN
-    SELECT CASE
-        WHEN NOT EXISTS(
-            SELECT 1 FROM humans
-            WHERE id <> OLD.id AND role = 'admin' AND status = 'active'
-        )
-        THEN RAISE(ABORT, 'last_active_admin_required')
-    END;
-END;
+CREATE TRIGGER trg_humans_keep_last_active_admin_delete BEFORE DELETE ON humans WHEN OLD.role = 'admin' AND OLD.status = 'active' BEGIN SELECT CASE WHEN NOT EXISTS(SELECT 1 FROM humans WHERE id <> OLD.id AND role = 'admin' AND status = 'active') THEN RAISE(ABORT, 'last_active_admin_required') END; END;
 
 CREATE TABLE board_staff (
     board_id TEXT NOT NULL REFERENCES boards(id) ON DELETE CASCADE ON UPDATE RESTRICT,
