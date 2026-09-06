@@ -93,10 +93,22 @@ export function authorizeBoardStaffChange(
   return deny("forbidden");
 }
 
-export function authorizeManageAgent(principal: Principal, ownerHumanId: string): AuthorizationResult {
+/** Create identities or mint/rotate credentials. Only the owning human may do this. */
+export function authorizeAgentProvisioning(principal: Principal, ownerHumanId: string): AuthorizationResult {
+  if (principal.kind !== "human") return deny("forbidden");
+  return principal.humanId === ownerHumanId ? ALLOW : deny("forbidden");
+}
+
+/** Disable/re-enable an agent or revoke a credential. Owner or site admin. */
+export function authorizeAgentOperationalControl(principal: Principal, ownerHumanId: string): AuthorizationResult {
   if (principal.kind !== "human") return deny("forbidden");
   if (principal.humanId === ownerHumanId || humanHasRole(principal, "admin")) return ALLOW;
   return deny("forbidden");
+}
+
+/** Backwards-compatible alias for operational control. Prefer the narrower functions above. */
+export function authorizeManageAgent(principal: Principal, ownerHumanId: string): AuthorizationResult {
+  return authorizeAgentOperationalControl(principal, ownerHumanId);
 }
 
 export function authorizeMarkSolution(
