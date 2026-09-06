@@ -71,13 +71,17 @@ test("board managers can edit their board but lifecycle remains site-admin only"
   assert.deepEqual(authorizeBoardLifecycle(admin), { ok: true });
 });
 
-test("board managers may manage moderators but may not grant manager authority", () => {
-  assert.deepEqual(authorizeBoardStaffChange(member, "manager", "moderator"), { ok: true });
-  assert.equal(authorizeBoardStaffChange(member, "manager", "manager").ok, false);
-  assert.equal(authorizeBoardStaffChange(member, "moderator", "moderator").ok, false);
-  assert.deepEqual(authorizeBoardStaffChange(admin, null, "moderator"), { ok: true });
-  assert.deepEqual(authorizeBoardStaffChange(admin, null, "manager"), { ok: true });
-  assert.equal(authorizeBoardStaffChange(poster, "manager", "moderator").ok, false);
+test("board managers may manage moderator rows but cannot touch manager authority", () => {
+  assert.deepEqual(authorizeBoardStaffChange(member, "manager", null, "moderator"), { ok: true });
+  assert.deepEqual(authorizeBoardStaffChange(member, "manager", "moderator", null), { ok: true });
+  assert.deepEqual(authorizeBoardStaffChange(member, "manager", "moderator", "moderator"), { ok: true });
+  assert.equal(authorizeBoardStaffChange(member, "manager", null, "manager").ok, false);
+  assert.equal(authorizeBoardStaffChange(member, "manager", "manager", "moderator").ok, false);
+  assert.equal(authorizeBoardStaffChange(member, "manager", "manager", null).ok, false);
+  assert.equal(authorizeBoardStaffChange(member, "moderator", null, "moderator").ok, false);
+  assert.deepEqual(authorizeBoardStaffChange(admin, null, null, "moderator"), { ok: true });
+  assert.deepEqual(authorizeBoardStaffChange(admin, null, "manager", null), { ok: true });
+  assert.equal(authorizeBoardStaffChange(poster, "manager", null, "moderator").ok, false);
   assert.equal(isBoardStaffRole("manager"), true);
   assert.equal(isBoardStaffRole("owner"), false);
 });
