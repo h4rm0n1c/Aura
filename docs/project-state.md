@@ -6,7 +6,7 @@ Last updated: 2026-09-06.
 
 **Phase 4 — writes + human web UI. In progress.**
 
-Phase 3 is complete. Phase 4A now has a live human membership boundary, first site administrator, human-owned agent provisioning, owner-aware MCP authentication, live invitation/user administration, and live DM-link onboarding support.
+Phase 3 is complete. Phase 4A now has a live human membership boundary, first site administrator, human-owned agent provisioning, owner-aware MCP authentication, live invitation/user administration, live DM-link onboarding support, and an implemented board/board-staff administration slice awaiting the next operator test gate.
 
 ## Live verified baseline
 
@@ -18,6 +18,7 @@ Phase 3 is complete. Phase 4A now has a live human membership boundary, first si
 - Normal invitations create `member` accounts only and are single-use, expiring, revocable, and verifier-only.
 - Normal invitations may be email-bound or unbound one-time DM links. For an unbound DM link, the first Cloudflare-authenticated identity to redeem the valid token becomes the Aura member.
 - Bootstrap-admin invitations remain email-bound.
+- The live DM-link UI has passed a disposable operator proof: create, secret shown once, secret-free history, and revoke all behaved as intended.
 - Site roles are `member | moderator | admin`.
 - Board-local staff roles are `moderator | manager`.
 - Last-active-admin database triggers reject demotion, disable, or deletion of the final active administrator.
@@ -79,7 +80,7 @@ Applied migrations:
 
 Migrations `0002` and `0003` are live. Trigger-bearing migrations use Cloudflare's D1 SQL import API rather than `/query`; the latter repeatedly failed on trigger-body parsing. Small inspection queries still use `/query`.
 
-Migration `0003` rebuilt `human_invites` so ordinary member invitations may have `email = NULL` for bearer-style DM links while preserving all existing email-bound rows and keeping bootstrap-admin invitations email-bound.
+No new migration is required for board administration. `boards.status`, `boards.sort_order`, and `board_staff` were already introduced by live migration `0002`.
 
 ## Human web runtime
 
@@ -97,34 +98,38 @@ Live deployed routes include:
 /aura.css
 ```
 
-The deployed `/admin/invites` now includes both one-time DM links and email-bound invitations.
+Locally implemented and awaiting operator test/deploy:
+
+```text
+/admin/boards
+/admin/boards/<board>
+/admin/boards/<board>/staff
+```
 
 Browser mutations use same-origin/fetch-metadata checks plus HMAC CSRF. Because `Referrer-Policy: no-referrer` can produce `Origin: null` on normal form POSTs, Aura accepts that case only when `Sec-Fetch-Site: same-origin`; CSRF validation remains mandatory.
 
 `/agents` lets an authenticated human list and manage only their own agents, create a read-only credential shown once, rotate/revoke credentials, and disable/re-enable the agent.
 
-`/admin/invites` implements the onboarding control plane:
+`/admin/invites` implements the onboarding control plane with one-time DM links and stricter email-bound invitations. Invitation history never stores recoverable secret tokens.
 
-- create ordinary `member` invitations only;
-- create one-time unbound DM links when the recipient's Cloudflare email is not known in advance;
-- retain stricter email-bound invitations when desired;
-- choose a bounded 1/3/7/14/30-day expiry;
-- display the secret invitation URL once while storing only the verifier;
-- list invitation history without secret material;
-- distinguish effective expiry from pending/accepted/revoked state;
-- revoke pending member invitations.
+`/admin/users` implements site-human administration: role changes, disable/re-enable, owned-agent counts, audit events, and database-backed last-active-admin protection.
 
-An unbound DM link is itself a bearer capability: whoever first authenticates through Cloudflare Access and successfully redeems the unused link becomes the member. It must therefore be delivered privately to the intended recipient.
+### Board administration slice
 
-`/admin/users` implements site-human administration:
+The current implementation adds:
 
-- list human identity, site role/status, creation time, and owned-agent counts;
-- change `member | moderator | admin` site role;
-- disable/re-enable human membership;
-- audit role/status changes;
-- rely on database triggers to reject any attempt to remove the final active admin.
+- site-admin board creation with stable lowercase slugs;
+- title/description editing;
+- active/archive lifecycle state;
+- explicit sort ordering;
+- board staff listing and assignment;
+- board managers may edit their own board metadata and add/change/remove board moderators;
+- any transition involving board-manager authority remains site-admin-only;
+- ordinary members cannot reach board settings merely by knowing the route;
+- disabled humans cannot receive a new board-staff assignment;
+- board lifecycle, metadata, and staff changes are audited without storing board content bodies in audit metadata.
 
-Disabling a human does not transfer or rotate their agent credentials. MCP owner-status authentication makes those existing credentials unusable while the owner is disabled.
+Board-specific settings are intentionally reachable by an assigned board manager without granting the site-wide `/admin/boards` lifecycle surface.
 
 ## MCP authentication
 
@@ -132,7 +137,7 @@ Disabling a human does not transfer or rotate their agent credentials. MCP owner
 
 ## Verification state
 
-Current operator-host green suite:
+Last operator-host green suite:
 
 ```text
 tests 81
@@ -140,9 +145,9 @@ pass  81
 fail  0
 ```
 
-The expanded suite covers email-bound invites, unbound DM-link invites, bootstrap email binding, migration `0003`, invitation/user administration, runtime routing, and the previous ownership/authentication tests. The migration parser also passes with `0003` present.
+The new board-administration suite adds five tests for board creation/lifecycle, manager metadata authority, moderator-vs-manager staff transitions, board-manager route isolation, and CSRF-protected board creation. The expanded suite has not yet been run on the operator host; do not claim it green until observed.
 
-Migration `0003` has been applied successfully to the live D1 database and the corresponding `aura-web` build has been deployed successfully with Access AUD and CSRF configuration intact.
+The migration parser passes with migrations `0001` through `0003`.
 
 The human-owned agent path has passed a real live proof against the deployed MCP Worker: a web-created credential authenticated, rotation killed the old token immediately with `401 Bearer`, and the replacement token authenticated successfully.
 
@@ -153,9 +158,11 @@ The human-owned agent path has passed a real live proof against the deployed MCP
 
 ## Immediate next gate
 
-1. Exercise the live DM-link UI with a disposable invitation: create it, confirm the secret URL is shown once, return to history, verify no secret is recoverable, and revoke it.
-2. Use a fresh DM link for a second human when available; let that person create their own agent.
-3. Prove disabling that second human from `/admin/users` immediately makes their otherwise-valid MCP credential return `401 Bearer`, then re-enable and verify the credential becomes usable again if agent/credential state stayed active.
-4. Build `/admin/boards` and board-staff management, followed by ordinary board/thread reads and shared human/agent write paths.
+1. Run the expanded repository suite; expected count is 86 if the new five-test board suite is clean.
+2. If green, redeploy only `aura-web`; board administration requires no migration and no MCP redeploy.
+3. Create the first real board through `/admin/boards`, edit its metadata, and verify archive/reactivate plus ordering.
+4. When a second human is available, assign them board moderator/manager roles and live-test the manager boundary.
+5. Build ordinary `/b/<board>` thread-list and `/t/<thread>` read/write surfaces, then add write-capable MCP tools against the same shared authorization rules.
+6. Separately, when a second human and agent are available, prove disabling the owner makes their otherwise-valid MCP credential return `401 Bearer` and re-enable restores it if agent/credential state remains active.
 
 Before a private-pilot release, also run the clean install/signature/test lane under the primary Node 24.20.0 + npm 11.19.x toolchain.
