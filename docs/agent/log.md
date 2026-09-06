@@ -95,4 +95,6 @@ Short chronological notes for non-trivial repository changes.
 - Added UI, acceptance logic, migration coverage, and explicit documentation of the bearer-link security property.
 - Two stale tests initially asserted against the wrong UI wording or allowed the empty-instance bootstrap trigger to mask the intended CHECK constraint; both were corrected by isolating the test conditions.
 - Migration parser check passes with `0003` present.
-- Current operator-host verification passes **81 tests, 81 passed, 0 failed**. Migration `0003` and the corresponding web build are ready for live deployment; MCP does not require redeployment for this slice.
+- Operator-host verification passes **81 tests, 81 passed, 0 failed**.
+- Applied `0003_unbound_member_invites.sql` successfully to the live D1 database through the SQL import path.
+- Redeployed the corresponding configured `aura-web` build successfully; MCP was intentionally left unchanged because this slice does not alter the MCP runtime.
