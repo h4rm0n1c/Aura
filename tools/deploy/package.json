@@ -9,6 +9,7 @@
   },
   "scripts": {
     "plan": "node deploy.mjs --plan",
+    "inspect": "node deploy.mjs --inspect",
     "deploy": "node deploy.mjs --deploy"
   },
   "devDependencies": {
