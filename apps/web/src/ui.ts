@@ -41,7 +41,7 @@ export const AURA_CSS = String.raw`
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--text); font-size: 15px; line-height: 1.45; }
 a { color: var(--link); }
-a:focus-visible, button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 3px solid currentColor; outline-offset: 2px; }
+a:focus-visible, button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 3px solid currentColor; outline-offset: 2px; }
 header { border-bottom: 1px solid var(--line); background: var(--panel); }
 .bar { max-width: 1050px; margin: 0 auto; padding: .55rem .8rem; display: flex; gap: 1rem; align-items: baseline; flex-wrap: wrap; }
 .brand { font-weight: 800; letter-spacing: .02em; text-decoration: none; color: var(--text); }
@@ -59,8 +59,9 @@ dt { font-weight: 700; }
 dd { margin: 0; }
 form { margin: .75rem 0; }
 label { display: block; font-weight: 700; margin-bottom: .25rem; }
-input, textarea, button { font: inherit; }
-input[type="text"], input[type="email"], textarea { width: min(100%, 42rem); border: 1px solid var(--line); background: var(--panel); color: var(--text); padding: .45rem .5rem; }
+input, textarea, select, button { font: inherit; }
+input[type="text"], input[type="email"], textarea, select { border: 1px solid var(--line); background: var(--panel); color: var(--text); padding: .45rem .5rem; }
+input[type="text"], input[type="email"], textarea { width: min(100%, 42rem); }
 button { border: 1px solid var(--line); background: var(--panel); color: var(--text); padding: .4rem .75rem; cursor: pointer; }
 button:hover { filter: brightness(.97); }
 .meta { color: var(--muted); font-size: .9rem; }
@@ -68,6 +69,12 @@ ul.compact { margin: .4rem 0 .4rem 1.25rem; padding: 0; }
 code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
 .secret { display: block; white-space: pre-wrap; overflow-wrap: anywhere; border: 1px solid var(--line); background: var(--bg); padding: .65rem; margin: .6rem 0; }
 .inline { display: inline; margin-right: .5rem; }
+.table-wrap { overflow-x: auto; border: 1px solid var(--line); background: var(--panel); margin: .65rem 0; }
+table { width: 100%; border-collapse: collapse; font-size: .92rem; }
+th, td { border-bottom: 1px solid var(--line); padding: .45rem .55rem; text-align: left; vertical-align: top; }
+th { white-space: nowrap; background: var(--bg); }
+tr:last-child td { border-bottom: 0; }
+td form.inline { display: inline-flex; gap: .35rem; align-items: center; margin: .1rem .45rem .1rem 0; }
 footer { max-width: 1050px; margin: 1rem auto; padding: 0 .8rem 1rem; color: var(--muted); font-size: .85rem; }
 @media (max-width: 640px) {
   .identity { margin-left: 0; width: 100%; }
