@@ -9,6 +9,7 @@ const tests = [
   "apps/web/test/access.test.ts",
   "apps/web/test/invites.test.ts",
   "apps/web/test/agents.test.ts",
+  "apps/web/test/admin.test.ts",
   "apps/web/test/runtime.test.ts",
   "apps/mcp/test/bearer.test.ts",
   "apps/mcp/test/http-security.test.ts",
