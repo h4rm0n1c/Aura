@@ -1,12 +1,12 @@
 # Project state
 
-Last updated: 2026-09-05.
+Last updated: 2026-09-06.
 
 ## Current phase
 
 **Phase 3 — authenticated read-only MCP. In progress.**
 
-The local Phase 3 implementation is complete and tested. Deployment validation is still required before Phase 3 closes.
+The local Phase 3 implementation is complete and tested. A real registry-connected compatibility-host install/signature/test pass is complete. Cloudflare deployment and live two-agent/revocation validation remain before Phase 3 closes.
 
 ## Accepted baseline
 
@@ -57,33 +57,41 @@ No `agents`, Hono, Express, Cloudflare types package, frontend framework, or tes
 
 ## Verification
 
-The reconstructed full local suite passes **49 tests, 0 failures**.
+The full repository suite passes **49 tests, 0 failures**.
 
-The full local suite is verified on Node 22.16.0 + npm 10.9.2. Node 22.16 requires the built-in experimental type-stripping flag; the dependency-free test launcher supplies it automatically. Node 24.20.0 + npm 11.19.0 remains the primary/release toolchain.
+On 2026-09-06 a real registry-connected host running Node 22.22.2 + npm 10.9.7 completed:
 
-The committed application lock resolves only the three expected runtime packages with exact registry URLs and SHA-512 integrity values. The failed clean install in this sandbox is now classified as an environment limitation: the sandbox cannot resolve `registry.npmjs.org`. There is no evidence that `zod@4.5.4` itself is malformed or incompatible.
+- `npm ci --ignore-scripts` with only the expected three installed packages;
+- vulnerability audit with zero reported vulnerabilities;
+- `npm audit signatures` with **3 verified registry signatures** and **3 verified attestations**;
+- `npm test` with **49 passed, 0 failed**.
 
-Actual registry installation and `npm audit signatures` remain required on a host with registry connectivity.
+This validates Aura's Node 22 compatibility lane beyond the earlier reconstructed/sandbox checks and closes the apparent Zod-install concern. Node 24.20.0 + npm 11.19.x remains the primary/release lane; it should still receive the same clean-install/signature/test pass before a private-pilot release, but lack of that duplicate lane check is not blocking the Phase 3 deployment proof.
 
-## Deployment tooling decision
+## Deployment tooling
 
-ADR 0006 records the Wrangler assessment.
+ADR 0006 records the deployment-tool isolation decision.
 
-- current Wrangler reviewed: `4.129.0`;
-- do not add Wrangler to the root application lockfile;
-- do not use unpinned `npx wrangler`;
-- preferred next proof is a small direct Cloudflare API deploy path using a reviewed no-install-script bundler candidate (`esbuild-wasm@0.28.1`);
-- Wrangler remains an isolated, exact-pinned fallback if direct deployment becomes brittle or local `workerd` simulation proves necessary;
-- any Wrangler adoption must review lifecycle scripts and use a dedicated tooling trust boundary.
+`tools/deploy/` now contains a deliberately separate deployment trust boundary:
+
+- exact-pinned `esbuild-wasm@0.28.2` only;
+- its own package manifest and lockfile;
+- lifecycle scripts disabled;
+- no Wrangler in Aura's application lock;
+- a local-only `npm run plan` mode that bundles and validates configuration without making Cloudflare API calls;
+- an explicit `npm run deploy` mode that creates/reuses D1, applies migrations, verifies schema, uploads the Worker with D1/rate-limit bindings, enables `workers.dev`, and checks that unauthenticated `/mcp` access receives the expected `401 Bearer` challenge.
+
+The direct deployment path uses Cloudflare's documented HTTP APIs and built-in Node/Web Platform primitives. If it proves brittle or begins growing into a replacement Cloudflare CLI, stop and use the isolated Wrangler fallback instead.
 
 ## Required before closing Phase 3
 
-1. Run a real `npm ci --ignore-scripts`, `npm audit signatures`, and `npm test` under Node 24.20.0 + npm 11.19.x on a registry-connected host.
-2. Keep Node 22.16.0 + npm 10.9.x green as the compatibility floor.
-3. Prove the minimal bundle/deploy path; fall back to isolated Wrangler only if needed.
-4. Create/bind D1 and apply `db/migrations/0001_initial.sql`.
-5. Deploy the MCP Worker with D1 and both rate-limit bindings.
-6. Authenticate two distinct agent credentials and exercise initialize, tools/list, and read calls.
-7. Revoke one credential and prove live rejection.
+1. Install/verify the isolated deploy tool and run its local-only deployment plan on the operator host.
+2. Review the plan output, then explicitly deploy with the narrowly scoped Cloudflare API token.
+3. Confirm D1 migration/schema and the unauthenticated MCP `401 Bearer` smoke test on the real Worker.
+4. Create two distinct pilot agent identities/credentials plus minimal allowed test content.
+5. Exercise MCP initialize, `tools/list`, and read calls through both agent credentials.
+6. Revoke one credential and prove the deployed Worker rejects it immediately while the other remains valid.
 
 Do not begin Phase 4 writes/UI until those checks pass.
+
+Before a private-pilot release, also run the clean install/signature/test lane under the primary Node 24.20.0 + npm 11.19.x toolchain.
