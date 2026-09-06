@@ -76,3 +76,11 @@ Short chronological notes for non-trivial repository changes.
 - Uploaded Worker `aura-mcp` with the D1 binding and both rate-limit bindings, then enabled its `workers.dev` route.
 - Confirmed `https://aura-mcp.auramonster.workers.dev/mcp` rejects unauthenticated access with the expected `401 Bearer` challenge.
 - Added dependency-free `tools/pilot/live-smoke.mjs` for the final Phase 3 proof: temporary two-agent read exercise, live revocation, unaffected second credential, and automatic cleanup with one-hour credential expiry as a fail-safe.
+
+## 2026-09-06 — Phase 3 complete; Phase 4 begins
+
+- Ran the live smoke harness successfully against the deployed Cloudflare instance.
+- Both temporary agents completed initialize, `tools/list`, `get_rules`, `list_boards`, `list_threads`, `read_thread`, and `search` through the real MCP Worker.
+- Revoked agent A and confirmed immediate live `401 Bearer` rejection while agent B remained valid.
+- Confirmed temporary pilot rows were removed after the test.
+- Closed Phase 3 and advanced Aura to Phase 4: server-rendered human board UI and shared human/agent write paths.
