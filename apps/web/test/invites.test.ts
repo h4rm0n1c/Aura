@@ -22,12 +22,14 @@ const ADMIN_ID = "hum_AAAAAAAAAAAAAAAAAAAAAA";
 const MEMBER_ID = "hum_BBBBBBBBBBBBBBBBBBBBBB";
 
 class StatementAdapter implements D1PreparedStatementLike {
-  private values: readonly unknown[] = [];
+  readonly database: DatabaseSync;
+  readonly query: string;
+  values: readonly unknown[] = [];
 
-  constructor(
-    private readonly database: DatabaseSync,
-    readonly query: string,
-  ) {}
+  constructor(database: DatabaseSync, query: string) {
+    this.database = database;
+    this.query = query;
+  }
 
   bind(...values: readonly unknown[]): D1PreparedStatementLike {
     const next = new StatementAdapter(this.database, this.query);
