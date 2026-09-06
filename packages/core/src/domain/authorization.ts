@@ -3,9 +3,16 @@ import type { AuthorRef } from "./content.ts";
 import { domainError, type DomainError } from "./errors.ts";
 
 export type ThreadState = "open" | "solved" | "locked";
+export const BOARD_STAFF_ROLES = ["moderator", "manager"] as const;
+export type BoardStaffRole = (typeof BOARD_STAFF_ROLES)[number];
 export type AuthorizationResult = { readonly ok: true } | { readonly ok: false; readonly error: DomainError };
 
 const ALLOW: AuthorizationResult = Object.freeze({ ok: true });
+const BOARD_STAFF_ROLE_SET = new Set<string>(BOARD_STAFF_ROLES);
+
+export function isBoardStaffRole(value: unknown): value is BoardStaffRole {
+  return typeof value === "string" && BOARD_STAFF_ROLE_SET.has(value);
+}
 
 export function authorizeBoardRead(principal: Principal): AuthorizationResult {
   if (principal.kind === "human") return ALLOW;
@@ -22,8 +29,61 @@ export function authorizeThreadReply(principal: Principal, state: ThreadState): 
   return authorizeBoardPost(principal);
 }
 
+/** Site-wide moderation only. Board-local moderation uses authorizeBoardModeration. */
 export function authorizeModeration(principal: Principal): AuthorizationResult {
   return principal.kind === "human" && humanHasRole(principal, "moderator") ? ALLOW : deny("forbidden");
+}
+
+export function authorizeBoardModeration(
+  principal: Principal,
+  boardRole: BoardStaffRole | null = null,
+): AuthorizationResult {
+  if (principal.kind !== "human") return deny("forbidden");
+  if (humanHasRole(principal, "moderator")) return ALLOW;
+  return boardRole === "moderator" || boardRole === "manager" ? ALLOW : deny("forbidden");
+}
+
+/** Edit one board's ordinary metadata. Board managers may do this for their board. */
+export function authorizeBoardSettings(
+  principal: Principal,
+  boardRole: BoardStaffRole | null = null,
+): AuthorizationResult {
+  if (principal.kind !== "human") return deny("forbidden");
+  if (humanHasRole(principal, "admin")) return ALLOW;
+  return boardRole === "manager" ? ALLOW : deny("forbidden");
+}
+
+/** Create/archive/reorder boards. This remains site-admin authority. */
+export function authorizeBoardLifecycle(principal: Principal): AuthorizationResult {
+  return siteAdminOnly(principal);
+}
+
+/** Create/revoke human invitations. */
+export function authorizeInviteAdministration(principal: Principal): AuthorizationResult {
+  return siteAdminOnly(principal);
+}
+
+/** Disable/re-enable humans and change site roles. */
+export function authorizeHumanAdministration(principal: Principal): AuthorizationResult {
+  return siteAdminOnly(principal);
+}
+
+/**
+ * Change staff on one board.
+ *
+ * Site admins may grant/revoke either board role. A board manager may only
+ * grant/revoke board-moderator authority; manager authority remains site-admin
+ * controlled so local managers cannot expand their own privilege tier.
+ */
+export function authorizeBoardStaffChange(
+  principal: Principal,
+  actorBoardRole: BoardStaffRole | null,
+  targetRole: BoardStaffRole,
+): AuthorizationResult {
+  if (principal.kind !== "human") return deny("forbidden");
+  if (humanHasRole(principal, "admin")) return ALLOW;
+  if (actorBoardRole === "manager" && targetRole === "moderator") return ALLOW;
+  return deny("forbidden");
 }
 
 export function authorizeManageAgent(principal: Principal, ownerHumanId: string): AuthorizationResult {
@@ -32,9 +92,13 @@ export function authorizeManageAgent(principal: Principal, ownerHumanId: string)
   return deny("forbidden");
 }
 
-export function authorizeMarkSolution(principal: Principal, threadAuthor: AuthorRef): AuthorizationResult {
+export function authorizeMarkSolution(
+  principal: Principal,
+  threadAuthor: AuthorRef,
+  boardRole: BoardStaffRole | null = null,
+): AuthorizationResult {
   if (principal.kind === "human") {
-    if (humanHasRole(principal, "moderator")) return ALLOW;
+    if (authorizeBoardModeration(principal, boardRole).ok) return ALLOW;
     return threadAuthor.kind === "human" && threadAuthor.humanId === principal.humanId ? ALLOW : deny("forbidden");
   }
 
@@ -43,6 +107,10 @@ export function authorizeMarkSolution(principal: Principal, threadAuthor: Author
     agentHasCapability(principal, "mark_solution")
     ? ALLOW
     : deny("forbidden");
+}
+
+function siteAdminOnly(principal: Principal): AuthorizationResult {
+  return principal.kind === "human" && humanHasRole(principal, "admin") ? ALLOW : deny("forbidden");
 }
 
 function deny(code: "forbidden" | "thread_locked"): AuthorizationResult {
