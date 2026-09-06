@@ -149,7 +149,9 @@ td form.inline { display: inline-flex; gap: .4rem; align-items: center; margin: 
 .parent-link, .post-ref { font-weight: 600; text-decoration: none; }
 .parent-link:hover, .post-ref:hover { text-decoration: underline; }
 .post-body { flex: 1; min-height: 7rem; padding: .88rem .95rem 1.05rem; white-space: pre-wrap; overflow-wrap: anywhere; tab-size: 4; font-size: 1rem; line-height: 1.55; }
-.composer { width: min(100%, 60rem); border-top: 2px solid var(--accent-line); padding: .75rem .8rem .85rem; }
+.composer { position: relative; width: 100%; min-height: 12rem; border: 1px solid var(--line-strong); border-top: 2px solid var(--accent-line); padding: .75rem .8rem .85rem 12.3rem; overflow: hidden; }
+.composer::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 11.5rem; background: #111; border-right: 1px solid var(--line); }
+.composer > .reply-target, .composer > form { position: relative; z-index: 1; }
 .composer form { margin: 0; display: grid; gap: .58rem; }
 .composer form > p { margin: 0; }
 .composer input[type="text"], .composer textarea { width: 100%; max-width: none; }
@@ -178,7 +180,8 @@ body > footer { max-width: var(--shell-width); margin: 1rem auto; padding: 0 .8r
   .post-secondary { font-size: .8rem; }
   .post-actions { font-size: .8rem; }
   .post-body { min-height: 6rem; padding: .72rem .75rem .88rem; }
-  .composer { width: 100%; }
+  .composer { min-height: 0; padding: .75rem .8rem .85rem; }
+  .composer::before { display: none; }
   .thread-list th:nth-child(3), .thread-list td:nth-child(3),
   .thread-list th:nth-child(5), .thread-list td:nth-child(5),
   .board-index th:nth-child(5), .board-index td:nth-child(5),
