@@ -13,11 +13,13 @@ import type {
 import {
   acceptHumanInvite,
   createMemberInvite,
+  createMemberLinkInvite,
   revokeMemberInvite,
 } from "../src/membership/invites.ts";
 
 const migration1 = readFileSync(new URL("../../../db/migrations/0001_initial.sql", import.meta.url), "utf8");
 const migration2 = readFileSync(new URL("../../../db/migrations/0002_human_membership_and_board_staff.sql", import.meta.url), "utf8");
+const migration3 = readFileSync(new URL("../../../db/migrations/0003_unbound_member_invites.sql", import.meta.url), "utf8");
 const ADMIN_ID = "hum_AAAAAAAAAAAAAAAAAAAAAA";
 const MEMBER_ID = "hum_BBBBBBBBBBBBBBBBBBBBBB";
 
@@ -66,6 +68,7 @@ class DatabaseAdapter implements D1DatabaseLike {
     this.sqlite.exec("PRAGMA foreign_keys = ON;");
     this.sqlite.exec(migration1);
     this.sqlite.exec(migration2);
+    this.sqlite.exec(migration3);
   }
 
   prepare(query: string): D1PreparedStatementLike {
@@ -122,7 +125,7 @@ function identity(email: string, providerId = "cf-new"): VerifiedHumanIdentity {
   };
 }
 
-test("site admin creates verifier-only member invite and ordinary member cannot", async () => {
+test("site admin creates verifier-only email-bound member invite and ordinary member cannot", async () => {
   const db = new DatabaseAdapter();
   const admin = seedAdmin(db);
 
@@ -134,6 +137,7 @@ test("site admin creates verifier-only member invite and ordinary member cannot"
   assert.equal(created.ok, true);
   if (!created.ok) return db.close();
   assert.equal(created.value.email, "person@example.test");
+  assert.equal(created.value.binding, "email");
   assert.match(created.value.token, /^aura\.invite\.v1\./);
 
   const row = db.sqlite.prepare(`SELECT secret_verifier, email, initial_role FROM human_invites WHERE invite_id=?`).get(created.value.inviteId) as {
@@ -148,7 +152,7 @@ test("site admin creates verifier-only member invite and ordinary member cannot"
   db.close();
 });
 
-test("invite acceptance binds Access email and atomically creates the member", async () => {
+test("email-bound invite acceptance requires the matching Access email", async () => {
   const db = new DatabaseAdapter();
   const admin = seedAdmin(db);
   const created = await createMemberInvite(db, admin, "person@example.test", 100);
@@ -186,16 +190,57 @@ test("invite acceptance binds Access email and atomically creates the member", a
   db.close();
 });
 
+test("unbound DM invite is claimed by the first authenticated Cloudflare identity and remains one-time", async () => {
+  const db = new DatabaseAdapter();
+  const admin = seedAdmin(db);
+
+  const denied = await createMemberLinkInvite(db, ordinaryMember, 100);
+  assert.equal(denied.ok, false);
+  if (!denied.ok) assert.equal(denied.error.code, "forbidden");
+
+  const created = await createMemberLinkInvite(db, admin, 100);
+  assert.equal(created.ok, true);
+  if (!created.ok) return db.close();
+  assert.equal(created.value.email, null);
+  assert.equal(created.value.binding, "link");
+
+  const stored = db.sqlite.prepare("SELECT email, secret_verifier FROM human_invites WHERE invite_id=?").get(created.value.inviteId) as {
+    email: string | null;
+    secret_verifier: string;
+  };
+  assert.equal(stored.email, null);
+  assert.match(stored.secret_verifier, /^[0-9a-f]{64}$/);
+
+  const accepted = await acceptHumanInvite(db, identity("whatever-address@example.test", "cf-link-user"), created.value.token, 101);
+  assert.equal(accepted.ok, true);
+  if (!accepted.ok) return db.close();
+  const human = db.sqlite.prepare("SELECT provider_id, email, role FROM humans WHERE id=?").get(accepted.value.humanId) as {
+    provider_id: string;
+    email: string;
+    role: string;
+  };
+  assert.deepEqual({ ...human }, {
+    provider_id: "cf-link-user",
+    email: "whatever-address@example.test",
+    role: "member",
+  });
+
+  const second = await acceptHumanInvite(db, identity("second@example.test", "cf-link-second"), created.value.token, 102);
+  assert.equal(second.ok, false);
+  if (!second.ok) assert.equal(second.error.code, "not_found");
+  db.close();
+});
+
 test("revoked and expired member invites cannot be accepted", async () => {
   const db = new DatabaseAdapter();
   const admin = seedAdmin(db);
 
-  const revokedInvite = await createMemberInvite(db, admin, "revoked@example.test", 100);
+  const revokedInvite = await createMemberLinkInvite(db, admin, 100);
   assert(revokedInvite.ok);
   if (!revokedInvite.ok) return db.close();
   const revoked = await revokeMemberInvite(db, admin, revokedInvite.value.inviteId, 101);
   assert.equal(revoked.ok, true);
-  const acceptRevoked = await acceptHumanInvite(db, identity("revoked@example.test"), revokedInvite.value.token, 102);
+  const acceptRevoked = await acceptHumanInvite(db, identity("anything@example.test"), revokedInvite.value.token, 102);
   assert.equal(acceptRevoked.ok, false);
   if (!acceptRevoked.ok) assert.equal(acceptRevoked.error.code, "not_found");
 
@@ -208,7 +253,7 @@ test("revoked and expired member invites cannot be accepted", async () => {
   db.close();
 });
 
-test("bootstrap admin invite can create the first administrator and no later bootstrap is allowed", async () => {
+test("bootstrap admin invite stays email-bound and no later bootstrap is allowed", async () => {
   const db = new DatabaseAdapter();
   const created = await createHumanInviteToken((length) => new Uint8Array(length).fill(9));
   db.sqlite.prepare(`INSERT INTO human_invites
@@ -225,5 +270,8 @@ test("bootstrap admin invite can create the first administrator and no later boo
   assert.throws(() => db.sqlite.prepare(`INSERT INTO human_invites
     (invite_id, secret_verifier, email, kind, initial_role, status, created_at, expires_at)
     VALUES (?, ?, 'later@example.test', 'bootstrap_admin', 'admin', 'pending', 20, 3620)`).run(later.inviteId, later.verifier), /bootstrap_admin_requires_empty_instance/);
+  assert.throws(() => db.sqlite.prepare(`INSERT INTO human_invites
+    (invite_id, secret_verifier, email, kind, initial_role, status, created_at, expires_at)
+    VALUES (?, ?, NULL, 'bootstrap_admin', 'admin', 'pending', 20, 3620)`).run(later.inviteId, later.verifier), /CHECK/);
   db.close();
 });
