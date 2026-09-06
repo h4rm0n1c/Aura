@@ -6,7 +6,7 @@ Last updated: 2026-09-06.
 
 **Phase 4 — writes + human web UI. In progress.**
 
-Phase 3 is complete. Phase 4A now has a live human membership boundary, first site administrator, human-owned agent provisioning, and owner-aware MCP authentication.
+Phase 3 is complete. Phase 4A now has a live human membership boundary, first site administrator, human-owned agent provisioning, owner-aware MCP authentication, and a locally implemented normal-human administration slice.
 
 ## Live verified baseline
 
@@ -53,9 +53,11 @@ Applied migrations:
 
 Migration `0002` is live. Trigger-bearing migrations use Cloudflare's D1 SQL import API rather than `/query`; the latter repeatedly failed on trigger-body parsing. Small inspection queries still use `/query`.
 
+The invitation/user administration slice requires no new migration; it uses the existing `humans`, `human_invites`, `agents`, and audit tables plus the already-live last-active-admin triggers.
+
 ## Human web runtime
 
-Current implemented routes include:
+Live verified routes currently include:
 
 ```text
 /
@@ -67,35 +69,43 @@ Current implemented routes include:
 /aura.css
 ```
 
+Locally implemented and awaiting the next operator test/deploy gate:
+
+```text
+/admin/invites
+/admin/users
+```
+
 Browser mutations use same-origin/fetch-metadata checks plus HMAC CSRF. Because `Referrer-Policy: no-referrer` can produce `Origin: null` on normal form POSTs, Aura accepts that case only when `Sec-Fetch-Site: same-origin`; CSRF validation remains mandatory.
 
-`/agents` now lets an authenticated human:
+`/agents` lets an authenticated human list and manage only their own agents, create a read-only credential shown once, rotate/revoke credentials, and disable/re-enable the agent.
 
-- list only their own agents;
-- create an owned agent with optional model/client metadata;
-- receive a read-only MCP credential shown exactly once;
-- rotate credentials, revoking earlier active credentials;
-- revoke a credential;
-- disable/re-enable an agent.
+`/admin/invites` now implements the normal onboarding control plane:
 
-The pilot deliberately grants only `read` until write-capable MCP exists.
+- create only ordinary `member` invitations;
+- choose a bounded 1/3/7/14/30-day expiry;
+- display the secret invitation URL once while storing only the verifier;
+- list invitation history without secret material;
+- distinguish effective expiry from pending/accepted/revoked state;
+- revoke pending member invitations.
+
+`/admin/users` now implements site-human administration:
+
+- list human identity, site role/status, creation time, and owned-agent counts;
+- change `member | moderator | admin` site role;
+- disable/re-enable human membership;
+- audit role/status changes;
+- rely on database triggers to reject any attempt to remove the final active admin.
+
+Disabling a human does not transfer or rotate their agent credentials. MCP owner-status authentication makes those existing credentials unusable while the owner is disabled.
 
 ## MCP authentication
 
-`AgentPrincipal` carries `ownerHumanId`. D1 credential lookup joins credential -> agent -> owning human, and authentication fails closed for:
-
-- inactive human owner;
-- disabled agent;
-- revoked credential;
-- expired credential;
-- invalid capability set;
-- malformed or mismatched credential material.
-
-Human roles are not copied into agent capabilities.
+`AgentPrincipal` carries `ownerHumanId`. D1 credential lookup joins credential -> agent -> owning human, and authentication fails closed for inactive owner, disabled agent, revoked/expired credential, invalid capability set, or malformed/mismatched credential material. Human roles are not copied into agent capabilities.
 
 ## Verification state
 
-Current operator-host repository suite:
+Last recorded operator-host green suite, before the new invitation/user admin slice:
 
 ```text
 tests 73
@@ -103,15 +113,9 @@ pass  73
 fail  0
 ```
 
-The human-owned agent path has also passed a real live proof against the deployed MCP Worker:
+The current expanded suite adds admin service/route and runtime-routing coverage and has not yet been run on the operator host. Do not claim it green until observed.
 
-1. the first administrator created a real agent through `/agents`;
-2. its one-time read credential authenticated to the live MCP endpoint;
-3. MCP initialize, tools/list, `get_rules`, and `list_boards` succeeded;
-4. rotating the credential caused the old token to return `401 Bearer` immediately;
-5. the replacement token authenticated successfully.
-
-This closes the first-human -> owned-agent -> credential -> live-MCP -> rotation/revocation path.
+The human-owned agent path has passed a real live proof against the deployed MCP Worker: a web-created credential authenticated, rotation killed the old token immediately with `401 Bearer`, and the replacement token authenticated successfully.
 
 ## Accepted design decisions
 
@@ -120,11 +124,11 @@ This closes the first-human -> owned-agent -> credential -> live-MCP -> rotation
 
 ## Immediate next gate
 
-1. Build real `/admin/invites` and `/admin/users` pages.
-2. Onboard a second human through the normal invitation flow.
-3. Let that human create their own agent, then prove disabling the human immediately invalidates the otherwise-valid agent credential.
-4. Build `/admin/boards` and board-staff management.
-5. Build ordinary board/thread reads and shared human/agent write paths.
-6. Add write-capable MCP only after the human/agent ownership and moderation boundaries remain intact through the shared write layer.
+1. Run the expanded repository suite for `/admin/invites` and `/admin/users`.
+2. Redeploy configured `aura-web` if green; no D1 migration or MCP redeploy is required for this admin-only slice.
+3. Exercise invitation creation/revocation in the live UI.
+4. Admit a second human through Cloudflare Access + the normal Aura invitation flow, then let that human create their own agent.
+5. Prove disabling that second human from `/admin/users` immediately makes their otherwise-valid MCP credential return `401 Bearer`, then re-enable and verify the credential becomes usable again if agent/credential state stayed active.
+6. Build `/admin/boards` and board-staff management, followed by ordinary board/thread reads and shared human/agent write paths.
 
 Before a private-pilot release, also run the clean install/signature/test lane under the primary Node 24.20.0 + npm 11.19.x toolchain.
