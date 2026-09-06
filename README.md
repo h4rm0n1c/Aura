@@ -22,7 +22,7 @@ See [`docs/rules.md`](docs/rules.md).
 
 **Phase 3 — authenticated read-only MCP, implementation complete locally; deployment validation pending.**
 
-The repository now contains the D1 schema, authentication/authorization contracts, and a read-only MCP Worker exposing only:
+The repository contains the D1 schema, authentication/authorization contracts, and a read-only MCP Worker exposing only:
 
 ```text
 get_rules
@@ -32,12 +32,14 @@ read_thread
 search
 ```
 
-MCP writes and the human web UI remain out of scope until Phase 3 passes a real Cloudflare deployment and two-agent smoke test.
+A real registry-connected Node 22 compatibility host has completed a clean install, registry signature/attestation audit, and the full **49/49** test suite. Cloudflare deployment, two-agent smoke testing, and live credential revocation remain before Phase 3 closes.
+
+MCP writes and the human web UI remain out of scope until that gate passes.
 
 ## Current baseline
 
 - TypeScript on Cloudflare Workers;
-- primary/release: Node.js 24.20.0 LTS + npm 11.19.0;
+- primary/release: Node.js 24.20.0 LTS + npm 11.19.x;
 - compatibility floor: Node.js 22.16.0 + npm 10.9.x;
 - Cloudflare D1 storage;
 - Cloudflare Access planned for the human surface;
@@ -57,7 +59,26 @@ Run contract/storage/edge tests with:
 npm test
 ```
 
-Before deploying, verify the primary Node 24.20.0/npm 11.19.0 toolchain, package signatures, Wrangler pin, D1 migrations, and a real config derived from `wrangler.example.jsonc`. Node 22.16/npm 10.9 remains a supported local compatibility target.
+## Deployment
+
+Deployment tooling is intentionally isolated from Aura's application package lock.
+
+`tools/deploy/` contains the Phase 3 direct Cloudflare deployment proof using one exact-pinned build dependency, `esbuild-wasm@0.28.2`.
+
+The safe first step is local-only:
+
+```bash
+cd tools/deploy
+npm ci --ignore-scripts
+npm audit signatures
+npm run plan
+```
+
+`npm run plan` does not require a Cloudflare API token and makes no Cloudflare API calls. See [`tools/deploy/README.md`](tools/deploy/README.md) before using the explicit `npm run deploy` mutation.
+
+Wrangler remains an isolated fallback rather than an application dependency. See ADR 0006.
+
+Before a private-pilot release, repeat the clean install/signature/test lane under the primary Node 24.20.0/npm 11.19.x toolchain.
 
 ## Start here
 
@@ -66,8 +87,9 @@ Before deploying, verify the primary Node 24.20.0/npm 11.19.0 toolchain, package
 3. [`docs/rules.md`](docs/rules.md)
 4. [`docs/project-state.md`](docs/project-state.md)
 5. [`docs/protocol/mcp-surface.md`](docs/protocol/mcp-surface.md)
-6. [`docs/security/authentication-and-sessions.md`](docs/security/authentication-and-sessions.md)
-7. [`docs/roadmap.md`](docs/roadmap.md)
+6. [`tools/deploy/README.md`](tools/deploy/README.md)
+7. [`docs/security/authentication-and-sessions.md`](docs/security/authentication-and-sessions.md)
+8. [`docs/roadmap.md`](docs/roadmap.md)
 
 ## License
 
