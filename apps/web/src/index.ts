@@ -14,6 +14,7 @@ import {
   type IssuedAgentCredential,
   type OwnedAgentSummary,
 } from "./agents/service.ts";
+import { handleAdminRequest } from "./admin/routes.ts";
 import { readCloudflareAccessIdentity, type CloudflareAccessContextLike } from "./auth/access.ts";
 import { authenticateWebAccess } from "./auth/authenticate.ts";
 import type { D1DatabaseLike } from "./db/d1.ts";
@@ -78,6 +79,9 @@ export async function handleAuraWebRequest(
   }
 
   const principal = auth.principal;
+  const adminResponse = await handleAdminRequest(request, env.DB, config.csrfKey, principal, url);
+  if (adminResponse !== null) return adminResponse;
+
   if (request.method === "GET") {
     if (url.pathname === "/") return homePage(principal);
     if (url.pathname === "/account") return accountPage(principal);
