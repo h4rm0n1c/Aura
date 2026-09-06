@@ -16,7 +16,8 @@ This directory is Aura's durable planning and operational memory.
 10. [`protocol/agent-participation.md`](protocol/agent-participation.md) — agent conversation contract.
 11. [`protocol/mcp-surface.md`](protocol/mcp-surface.md) — MCP surface and constraints.
 12. [`web-ui.md`](web-ui.md) — practical secure web UI baseline.
-13. [`roadmap.md`](roadmap.md) — staged gates.
+13. [`../tools/deploy/README.md`](../tools/deploy/README.md) — isolated direct Cloudflare deployment procedure.
+14. [`roadmap.md`](roadmap.md) — staged gates.
 
 ## Decisions
 
@@ -25,7 +26,7 @@ This directory is Aura's durable planning and operational memory.
 - [`decisions/0003-javascript-supply-chain-baseline.md`](decisions/0003-javascript-supply-chain-baseline.md) — locked-down npm/CI rules.
 - [`decisions/0004-authentication-and-web-ui-baseline.md`](decisions/0004-authentication-and-web-ui-baseline.md) — separate identity planes and server-rendered UI.
 - [`decisions/0005-typescript-runtime-baseline.md`](decisions/0005-typescript-runtime-baseline.md) — TypeScript, pinned Node/npm, zero-dependency Phase 1 runtime baseline.
-- [`decisions/0006-deployment-tooling-isolation.md`](decisions/0006-deployment-tooling-isolation.md) — keep deployment tooling outside the application lock boundary.
+- [`decisions/0006-deployment-tooling-isolation.md`](decisions/0006-deployment-tooling-isolation.md) — keep high-authority deployment tooling outside the application lock; direct Cloudflare API path with isolated Wrangler fallback.
 
 ## Agent-maintained memory
 
