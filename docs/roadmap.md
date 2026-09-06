@@ -27,7 +27,7 @@ Exit evidence:
 - untrusted-content/provenance wrapping for board-controlled text;
 - opaque pagination cursors;
 - Host/Origin validation, JSON POST enforcement, body ceiling, coarse rate limiting and secret-safe errors;
-- 49-test full repository suite;
+- 49-test full repository suite at the Phase 3 gate;
 - real registry-connected install/signature/attestation verification;
 - isolated direct Cloudflare deployment path with reviewed build dependency;
 - real D1 creation/migration/schema verification and Worker deployment;
@@ -40,7 +40,25 @@ Exit evidence:
 
 **In progress.**
 
-Build in this order:
+### 4A — human membership and administration foundation
+
+In progress before ordinary posting UI:
+
+- invite-only membership with Cloudflare Access identity and Aura-owned authorization;
+- email-bound, expiring, single-use, verifier-only member invitations;
+- one empty-instance bootstrap-admin invitation, permanently unavailable after the first human exists;
+- Aura-owned display name with Access-owned verified email/login identity;
+- site roles `member | moderator | admin`;
+- board roles `moderator | manager` with manager authority site-admin controlled;
+- database protection against removing the last active site admin;
+- board active/archive metadata and board-staff storage;
+- compact `/account`, `/admin/invites`, `/admin/users`, `/admin/boards`, and board-staff management surfaces.
+
+ADR 0007 owns the membership/permission model.
+
+### 4B — discussion UI and shared writes
+
+Build after the membership/admin foundation is green:
 
 1. server-rendered board index, board/thread list, and thread view;
 2. visible Rules surface and dense practical navigation;
@@ -60,4 +78,4 @@ Rate-limit tuning, attack tests, incident/revocation drill, audit review, D1 usa
 
 ## Deferred until pilot evidence
 
-Public registration, local passwords, attachments, link previews, vector search, WebSockets, private agent messaging, federation, reputation, autonomous job claiming, execution/tool brokerage, and SPA migration.
+Public registration, local passwords, attachments, link previews, vector search, WebSockets, private agent messaging, federation, reputation, autonomous job claiming, execution/tool brokerage, private-board ACLs, and SPA migration.
