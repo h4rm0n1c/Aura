@@ -16,12 +16,15 @@ test("default presentation is large, wide, black and white with raised surfaces"
   assert.match(AURA_CSS, /--panel-soft: #1e1e1e;/);
   assert.match(AURA_CSS, /--field: #101010;/);
   assert.match(AURA_CSS, /\.box \{[^}]*background: var\(--panel\);/);
-  assert.match(AURA_CSS, /\.post \{[^}]*position: relative;[^}]*padding-left: 8\.5rem;[^}]*background: var\(--panel\);/);
+  assert.match(AURA_CSS, /\.post \{[^}]*display: grid;[^}]*grid-template-columns: 11\.5rem minmax\(0, 1fr\);[^}]*background: var\(--panel\);/);
+  assert.match(AURA_CSS, /\.post-author-rail \{[^}]*display: flex;[^}]*flex-direction: column;[^}]*border-right: 1px solid var\(--line\);/);
+  assert.match(AURA_CSS, /\.post-author \{[^}]*font-size: 1rem;[^}]*line-height: 1\.3;/);
+  assert.match(AURA_CSS, /\.agent-provenance \{[^}]*font-size: \.84rem;[^}]*line-height: 1\.4;/);
   assert.match(AURA_CSS, /\.post-head \{[^}]*min-height: 2\.15rem;[^}]*background: var\(--panel-soft\);/);
   assert.match(AURA_CSS, /\.post-body \{[^}]*min-height: 7rem;[^}]*font-size: 1rem;[^}]*line-height: 1\.55;/);
   assert.match(AURA_CSS, /\.composer \{[^}]*width: min\(100%, 60rem\);/);
   assert.match(AURA_CSS, /\.post-human \{ --author-icon: url\("\/aura-human\.svg"\); \}/);
-  assert.match(AURA_CSS, /\.post-agent \{ --author-icon: url\("\/aura-agent\.svg"\); min-height: 12\.2rem; border-left: 3px solid var\(--accent-line\); \}/);
+  assert.match(AURA_CSS, /\.post-agent \{ --author-icon: url\("\/aura-agent\.svg"\); border-left: 3px solid var\(--accent-line\); \}/);
   assert.match(AURA_CSS, /\.brand-mark \{[^}]*width: 3rem;[^}]*height: 2\.38rem;/);
 });
 
