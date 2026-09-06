@@ -19,6 +19,7 @@ import type { D1DatabaseLike, D1PreparedStatementLike, D1ResultLike } from "../s
 const migration1 = readFileSync(new URL("../../../db/migrations/0001_initial.sql", import.meta.url), "utf8");
 const migration2 = readFileSync(new URL("../../../db/migrations/0002_human_membership_and_board_staff.sql", import.meta.url), "utf8");
 const migration3 = readFileSync(new URL("../../../db/migrations/0003_unbound_member_invites.sql", import.meta.url), "utf8");
+const migration4 = readFileSync(new URL("../../../db/migrations/0004_board_thread_lifecycle.sql", import.meta.url), "utf8");
 
 const ADMIN = "hum_AAAAAAAAAAAAAAAAAAAAAA";
 const MANAGER = "hum_BBBBBBBBBBBBBBBBBBBBBB";
@@ -69,6 +70,7 @@ class DatabaseAdapter implements D1DatabaseLike {
     this.sqlite.exec(migration1);
     this.sqlite.exec(migration2);
     this.sqlite.exec(migration3);
+    this.sqlite.exec(migration4);
   }
 
   prepare(query: string): D1PreparedStatementLike {
@@ -148,6 +150,7 @@ test("site admin creates, lists, and archives boards while ordinary members cann
   assert.equal(listed.value[0].slug, "general");
   assert.equal(listed.value[0].status, "active");
   assert.equal(listed.value[0].sortOrder, 0);
+  assert.equal(listed.value[0].maxThreads, 100);
 
   const archived = await setBoardStatus(db, admin, boardId, "archived", 12);
   assert.deepEqual(archived, { ok: true, value: { boardId, status: "archived" } });
@@ -157,7 +160,7 @@ test("site admin creates, lists, and archives boards while ordinary members cann
   db.close();
 });
 
-test("board manager edits metadata but cannot change board lifecycle", async () => {
+test("board manager edits metadata and thread capacity but cannot change board lifecycle", async () => {
   const db = new DatabaseAdapter();
   const admin = seedHuman(db, ADMIN, "admin", "admin");
   const manager = seedHuman(db, MANAGER, "manager");
@@ -169,16 +172,26 @@ test("board manager edits metadata but cannot change board lifecycle", async () 
   assert.equal(managed.ok, true);
   if (!managed.ok) return db.close();
   assert.equal(managed.value.actorBoardRole, "manager");
+  assert.equal(managed.value.maxThreads, 100);
 
   const edited = await updateBoardMetadata(db, manager, boardId, {
     title: "General work",
     description: "Updated by board manager",
+    maxThreads: 75,
   }, 12);
   assert.equal(edited.ok, true);
-  const stored = db.sqlite.prepare("SELECT title, description FROM boards WHERE id=?").get(boardId) as { title: string; description: string };
-  assert.deepEqual({ ...stored }, { title: "General work", description: "Updated by board manager" });
+  const stored = db.sqlite.prepare("SELECT title, description, max_threads FROM boards WHERE id=?").get(boardId) as { title: string; description: string; max_threads: number };
+  assert.deepEqual({ ...stored }, { title: "General work", description: "Updated by board manager", max_threads: 75 });
 
-  const lifecycle = await setBoardStatus(db, manager, boardId, "archived", 13);
+  const invalidCap = await updateBoardMetadata(db, manager, boardId, {
+    title: "General work",
+    description: "Updated by board manager",
+    maxThreads: 0,
+  }, 13);
+  assert.equal(invalidCap.ok, false);
+  if (!invalidCap.ok) assert.equal(invalidCap.error.code, "validation_error");
+
+  const lifecycle = await setBoardStatus(db, manager, boardId, "archived", 14);
   assert.equal(lifecycle.ok, false);
   if (!lifecycle.ok) assert.equal(lifecycle.error.code, "forbidden");
   db.close();
@@ -234,7 +247,9 @@ test("board-specific admin routes admit managers without granting the site admin
   );
   assert(boardPage);
   assert.equal(boardPage.status, 200);
-  assert.match(await boardPage.text(), /Save board metadata/);
+  const boardHtml = await boardPage.text();
+  assert.match(boardHtml, /Save board settings/);
+  assert.match(boardHtml, /name="max_threads"[^>]*value="100"/);
 
   const staffPage = await handleAdminRequest(
     new Request(`https://aura.example/admin/boards/${boardId}/staff`),
@@ -275,6 +290,7 @@ test("admin board route creates a board through the CSRF-protected HTML form", a
   assert.equal(get.status, 200);
   const html = await get.text();
   assert.match(html, /Create board/);
+  assert.match(html, /Maximum live threads/);
   const token = /name="csrf" value="([^"]+)"/.exec(html)?.[1];
   assert(token);
 
@@ -290,6 +306,7 @@ test("admin board route creates a board through the CSRF-protected HTML form", a
         slug: "project-help",
         title: "Project help",
         description: "Ask for help with permitted projects.",
+        max_threads: "64",
       }).toString(),
     }),
     db,
@@ -300,6 +317,7 @@ test("admin board route creates a board through the CSRF-protected HTML form", a
   assert(post);
   assert.equal(post.status, 303);
   assert.match(post.headers.get("location") ?? "", /^\/admin\/boards\/brd_/);
-  assert.equal((db.sqlite.prepare("SELECT count(*) AS n FROM boards WHERE slug='project-help'").get() as { n: number }).n, 1);
+  const stored = db.sqlite.prepare("SELECT max_threads FROM boards WHERE slug='project-help'").get() as { max_threads: number };
+  assert.equal(stored.max_threads, 64);
   db.close();
 });
