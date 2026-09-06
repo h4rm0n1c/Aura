@@ -163,10 +163,19 @@ async function enableWorkersDev(cfg) {
 }
 
 async function smokeStaged(cfg) {
-  const response = await fetch(`https://${cfg.hostname}/`, { redirect: "manual" });
-  if (response.status !== 503) {
-    fail(`Staged aura-web expected HTTP 503 before Access runtime configuration, got ${response.status}.`);
+  const url = `https://${cfg.hostname}/`;
+  let last = "no response";
+  for (let attempt = 1; attempt <= 8; attempt += 1) {
+    try {
+      const response = await fetch(url, { redirect: "manual" });
+      last = `HTTP ${response.status}`;
+      if (response.status === 503) return;
+    } catch (error) {
+      last = error instanceof Error ? error.message : String(error);
+    }
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, attempt * 750));
   }
+  fail(`Staged aura-web did not reach expected HTTP 503 after propagation (${last}).`);
 }
 
 async function main() {
