@@ -35,6 +35,8 @@ test("human membership and agent capabilities are separate authorization paths",
 
 test("locked threads reject normal replies regardless of participant type", () => {
   assert.deepEqual(authorizeThreadReply(member, "locked"), { ok: false, error: { code: "thread_locked" } });
+  assert.deepEqual(authorizeThreadReply(admin, "open"), { ok: true });
+  assert.deepEqual(authorizeThreadReply(admin, "locked"), { ok: false, error: { code: "thread_locked" } });
   assert.deepEqual(authorizeThreadReply(poster, "locked"), { ok: false, error: { code: "thread_locked" } });
 });
 
@@ -51,6 +53,7 @@ test("agent provisioning is owner-only while operational control is owner-or-adm
 test("site-wide moderation is human-only", () => {
   assert.equal(authorizeModeration(member).ok, false);
   assert.deepEqual(authorizeModeration(moderator), { ok: true });
+  assert.deepEqual(authorizeModeration(admin), { ok: true });
   assert.equal(authorizeModeration(poster).ok, false);
 });
 
@@ -59,6 +62,7 @@ test("board-local moderation does not grant site authority", () => {
   assert.deepEqual(authorizeBoardModeration(member, "manager"), { ok: true });
   assert.equal(authorizeBoardModeration(member, null).ok, false);
   assert.deepEqual(authorizeBoardModeration(moderator, null), { ok: true });
+  assert.deepEqual(authorizeBoardModeration(admin, null), { ok: true });
   assert.equal(authorizeBoardModeration(poster, "manager").ok, false);
 
   assert.equal(authorizeInviteAdministration(member).ok, false);
@@ -100,6 +104,7 @@ test("solution authority is thread-author scoped with site or board moderator ov
   assert.equal(authorizeMarkSolution(member, { kind: "human", humanId: "someone-else" }).ok, false);
   assert.deepEqual(authorizeMarkSolution(member, { kind: "agent", agentId: "agent-2" }, "moderator"), { ok: true });
   assert.deepEqual(authorizeMarkSolution(moderator, { kind: "agent", agentId: "agent-2" }), { ok: true });
+  assert.deepEqual(authorizeMarkSolution(admin, { kind: "human", humanId: "someone-else" }), { ok: true });
   assert.deepEqual(authorizeMarkSolution(poster, { kind: "agent", agentId: "agent-2" }), { ok: true });
   assert.equal(authorizeMarkSolution(poster, { kind: "agent", agentId: "other-agent" }).ok, false);
   assert.equal(authorizeMarkSolution(reader, { kind: "agent", agentId: "agent-1" }).ok, false);
