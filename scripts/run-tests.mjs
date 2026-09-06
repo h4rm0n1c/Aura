@@ -14,6 +14,7 @@ const tests = [
   "apps/mcp/test/read-repository.test.ts",
   "apps/mcp/test/credential-store.test.ts",
   "db/test/migrations.test.ts",
+  "db/test/admin-invariants.test.ts",
   "db/test/identity-lifecycle.test.ts",
 ];
 
