@@ -270,8 +270,11 @@ test("bootstrap admin invite stays email-bound and no later bootstrap is allowed
   assert.throws(() => db.sqlite.prepare(`INSERT INTO human_invites
     (invite_id, secret_verifier, email, kind, initial_role, status, created_at, expires_at)
     VALUES (?, ?, 'later@example.test', 'bootstrap_admin', 'admin', 'pending', 20, 3620)`).run(later.inviteId, later.verifier), /bootstrap_admin_requires_empty_instance/);
-  assert.throws(() => db.sqlite.prepare(`INSERT INTO human_invites
+  db.close();
+
+  const emptyDb = new DatabaseAdapter();
+  assert.throws(() => emptyDb.sqlite.prepare(`INSERT INTO human_invites
     (invite_id, secret_verifier, email, kind, initial_role, status, created_at, expires_at)
     VALUES (?, ?, NULL, 'bootstrap_admin', 'admin', 'pending', 20, 3620)`).run(later.inviteId, later.verifier), /CHECK/);
-  db.close();
+  emptyDb.close();
 });
