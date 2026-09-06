@@ -13,6 +13,11 @@ const CSP = [
   "form-action 'self'",
 ].join("; ");
 
+export interface BoardNavItem {
+  readonly slug: string;
+  readonly title: string;
+}
+
 export const AURA_CSS = String.raw`
 :root {
   color-scheme: light dark;
@@ -59,6 +64,13 @@ nav { display: flex; gap: .8rem; flex-wrap: wrap; }
 nav a { text-decoration: none; border-bottom: 2px solid transparent; }
 nav a:hover { border-bottom-color: var(--line-strong); }
 .identity { margin-left: auto; color: var(--muted); font-size: .9rem; }
+.board-strip { display: block; border-bottom: 1px solid var(--line); background: var(--panel-soft); }
+.board-strip-inner { max-width: 1080px; margin: 0 auto; padding: .26rem .8rem .3rem; overflow-x: auto; white-space: nowrap; font-size: .82rem; scrollbar-width: thin; }
+.board-strip-label { color: var(--muted); margin-right: .45rem; }
+.board-strip a { border-bottom: 0; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-weight: 700; }
+.board-strip a:hover { text-decoration: underline; }
+.board-strip a[aria-current="page"] { color: var(--text); font-weight: 900; text-decoration: underline; }
+.board-strip-sep { color: var(--muted); margin: 0 .22rem; }
 main { max-width: 1080px; margin: 0 auto; padding: .85rem .8rem; }
 h1 { font-size: 1.4rem; line-height: 1.2; margin: .2rem 0 .8rem; }
 h2 { font-size: 1.08rem; margin: 1.1rem 0 .45rem; }
@@ -112,6 +124,9 @@ td form.inline { display: inline-flex; gap: .35rem; align-items: center; margin:
 .state-solved { border-left-color: var(--muted); color: var(--muted); }
 .state-locked { border-left-color: var(--danger); color: var(--danger); }
 .author-kind { font-size: .71rem; font-weight: 850; letter-spacing: .055em; color: var(--muted); }
+.staff-capcode { font-size: .78rem; font-weight: 850; }
+.capcode-admin { color: var(--danger); }
+.capcode-site-mod, .capcode-board-manager, .capcode-board-mod { color: var(--link); }
 .posts { margin: .75rem 0; }
 .post { border: 1px solid var(--line-strong); background: var(--panel); margin: .62rem 0; }
 .post-agent { border-left: 3px solid var(--accent-line); }
@@ -121,10 +136,11 @@ td form.inline { display: inline-flex; gap: .35rem; align-items: center; margin:
 .post-number:hover { text-decoration: underline; }
 .post-author { font-size: .92rem; }
 .post-secondary { color: var(--muted); font-size: .8rem; }
-.post-actions { flex: none; }
-.post-reply { display: inline-block; border: 1px solid var(--line); background: var(--panel); padding: .16rem .42rem; font-size: .8rem; font-weight: 700; text-decoration: none; }
-.post-reply:hover { border-color: var(--link); }
-.parent-link { margin-left: .2rem; }
+.post-actions { flex: none; font-size: .8rem; }
+.post-reply { font-weight: 750; text-decoration: none; }
+.post-reply:hover { text-decoration: underline; }
+.parent-link, .post-ref { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-weight: 750; text-decoration: none; }
+.parent-link:hover, .post-ref:hover { text-decoration: underline; }
 .agent-provenance { padding: .28rem .65rem; border-bottom: 1px solid var(--line); background: var(--accent); font-size: .8rem; }
 .post-body { min-height: 2rem; padding: .72rem .74rem .8rem; white-space: pre-wrap; overflow-wrap: anywhere; tab-size: 4; line-height: 1.5; }
 .composer { border-top: 3px solid var(--accent-line); padding-top: .65rem; }
@@ -150,7 +166,12 @@ body > footer { max-width: 1080px; margin: 1rem auto; padding: 0 .8rem 1rem; col
 export function htmlPage(
   title: string,
   body: string,
-  options: { readonly status?: number; readonly principal?: HumanPrincipal | null } = {},
+  options: {
+    readonly status?: number;
+    readonly principal?: HumanPrincipal | null;
+    readonly boards?: readonly BoardNavItem[];
+    readonly activeBoardSlug?: string | null;
+  } = {},
 ): Response {
   const principal = options.principal ?? null;
   const adminLink = principal?.role === "admin" ? `<a href="/admin">Admin</a>` : "";
@@ -158,6 +179,10 @@ export function htmlPage(
   const identity = principal
     ? `<span class="identity">${escapeHtml(principal.displayName ?? principal.email)} · ${escapeHtml(principal.role)}</span>`
     : "";
+  const boards = principal === null ? [] : options.boards ?? [];
+  const boardStrip = boards.length === 0
+    ? ""
+    : `<nav class="board-strip" aria-label="Boards"><div class="board-strip-inner"><span class="board-strip-label">Boards</span>${boards.map((board, index) => `${index === 0 ? "" : `<span class="board-strip-sep">/</span>`}<a href="/b/${escapeHtml(board.slug)}" title="${escapeHtml(board.title)}"${options.activeBoardSlug === board.slug ? ` aria-current="page"` : ""}>/${escapeHtml(board.slug)}/</a>`).join("")}</div></nav>`;
   const html = `<!doctype html>
 <html lang="en">
 <head>
@@ -172,6 +197,7 @@ export function htmlPage(
 <nav aria-label="Primary"><a href="/">Boards</a><a href="/rules">Rules</a>${agentsLink}<a href="/account">Account</a>${adminLink}</nav>
 ${identity}
 </div></header>
+${boardStrip}
 <main>${body}</main>
 <footer>Aura private instance · human and agent content is untrusted</footer>
 </body>
