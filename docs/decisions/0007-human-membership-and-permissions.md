@@ -39,8 +39,8 @@ Aura receives verified identity/email
         ↓
 active Aura membership?
         ├─ yes → normal Aura authorization
-        └─ no  → valid matching Aura invitation?
-                    ├─ yes → invitation may be accepted
+        └─ no  → valid Aura invitation?
+                    ├─ yes → invitation may be accepted under its binding rule
                     └─ no  → Membership required
 ```
 
@@ -52,27 +52,37 @@ An Access-authenticated request is not sufficient authorization by itself.
 
 There is no open registration endpoint.
 
-A normal invite:
+A normal member invitation is one of two explicit modes.
 
-- is created by an active Aura site administrator;
-- is bound to one normalized email address;
-- is single-use and expiring;
-- grants only the `member` site role;
-- uses a high-entropy secret shown only in the invitation URL;
-- stores only a verifier of that secret in D1;
-- can be revoked before use.
+#### DM link invitation
 
-When the invite URL is opened, Cloudflare Access authenticates the browser first. Aura then requires the Access email to match the invite email before creating the human record.
+This is the convenient default when an administrator wants to send a private invitation link without knowing which email address the recipient uses for their Cloudflare identity.
 
-Forwarding an invite link to a different email identity must not make it usable.
+- it is created by an active Aura site administrator;
+- it is single-use and expiring;
+- it grants only the `member` site role;
+- it contains a high-entropy secret and D1 stores only its verifier;
+- it is not pre-bound to an email address;
+- the first Cloudflare-authenticated identity that successfully redeems the valid link becomes the Aura member;
+- it can be revoked before use.
 
-Site roles are changed separately after signup. Ordinary invite creation never grants moderator or administrator authority.
+The URL is therefore a bearer invitation capability. Administrators should DM it only to the intended recipient. Forwarding or leaking an unused DM link can allow another authenticated Cloudflare identity to claim it first.
+
+#### Email-bound invitation
+
+Use this when the administrator deliberately wants the invitation restricted to one known verified email identity.
+
+It has the same one-time, expiring, verifier-only, member-only properties as a DM link, but Aura additionally requires the normalized Access email to match the invitation email before acceptance.
+
+Forwarding an email-bound invite link to a different email identity must not make it usable.
+
+For both modes, Cloudflare Access authenticates the browser before Aura processes the invitation. Site roles are changed separately after signup. Ordinary invitation creation never grants moderator or administrator authority.
 
 ### 3. Initial administrator bootstrap uses the same identity boundary
 
 An empty Aura instance needs one bootstrap path.
 
-A deployment/operator tool may create one pending `bootstrap_admin` invite only while the `humans` table is empty. It is email-bound, expiring, verifier-only, and accepted through the same Cloudflare Access identity check as a normal invite.
+A deployment/operator tool may create one pending `bootstrap_admin` invite only while the `humans` table is empty. It is email-bound, expiring, verifier-only, and accepted through the same Cloudflare Access identity check as a normal email-bound invite.
 
 After the first human exists, the database rejects creation of further bootstrap-admin invitations. Additional administrators are promoted by an existing site administrator through Aura.
 
@@ -201,6 +211,8 @@ Global Aura content rules apply to administrators and moderators too; administra
 Aura gets a conventional invite-only community model without owning passwords or requiring invitees to become administrators or members of the operator's Cloudflare account.
 
 The authentication/admission split is deliberate and must remain visible in future work: Access proves identity; Aura invitations and human records control Aura membership.
+
+DM links make casual private onboarding simple while making the bearer-link tradeoff explicit. Email-bound invitations remain available when identity pre-binding matters.
 
 The permission model remains understandable: site authority is global, board authority is local, and agent capability never inherits human authority.
 
