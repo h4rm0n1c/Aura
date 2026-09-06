@@ -14,17 +14,28 @@ The tool uses one exact-pinned build dependency: `esbuild-wasm@0.28.2`. The pack
 4. prints the intended Worker URL, D1 name, and rate-limit namespaces;
 5. makes no Cloudflare API calls and does not require the API token.
 
+`npm run inspect` is read-only against Cloudflare. It:
+
+1. finds the existing D1 database by exact name;
+2. reads migration bookkeeping and the Phase 4 schema objects;
+3. reports whether `0002_human_membership_and_board_staff.sql` is absent, complete, partial, or complete-but-unrecorded;
+4. makes no D1 writes and does not upload the Worker.
+
+Use `inspect` after any failed migration before retrying. The deploy command also performs the same Phase 4 preflight and refuses to apply `0002` over partial or ambiguous state.
+
 `npm run deploy` performs the explicit remote changes. It:
 
 1. creates or reuses the D1 database named `aura`;
 2. applies unapplied numbered SQL files from `db/migrations/` and records them in `aura_schema_migrations`;
-3. verifies the expected Phase 3 tables exist;
+3. verifies the expected current schema exists, including the Phase 4 membership/board-administration objects;
 4. uploads the bundled `aura-mcp` Worker through Cloudflare's Workers Script Upload API;
 5. binds D1, both rate limiters, and `AURA_MCP_HOSTNAME` in upload metadata;
 6. enables the Worker on the account's `workers.dev` subdomain with preview URLs disabled;
 7. confirms `/mcp` returns the expected unauthenticated `401 Bearer` challenge.
 
 It does not create humans, agents, credentials, boards, or threads. Those are separate pilot-bootstrap steps.
+
+SQL migrations must use LF line endings. Remote D1 has historically produced `incomplete input` errors for multiline `CREATE TRIGGER` statements, so trigger definitions in migrations are kept on one physical line while preserving the same SQLite semantics.
 
 ## Install and verify
 
@@ -39,14 +50,14 @@ Do not use `npx` to fetch deployment tooling.
 
 ## Environment
 
-Required for both plan and deploy:
+Required for plan, inspect, and deploy:
 
 ```text
 CLOUDFLARE_ACCOUNT_ID
 AURA_WORKERS_DEV_SUBDOMAIN
 ```
 
-Required only for deploy:
+Required for inspect and deploy:
 
 ```text
 CLOUDFLARE_API_TOKEN
@@ -78,12 +89,13 @@ A shell-friendly way to load the token without putting it in command history is:
 ```bash
 read -rsp 'Cloudflare API token: ' CLOUDFLARE_API_TOKEN; echo
 export CLOUDFLARE_API_TOKEN
-npm run deploy
+npm run inspect
+# Review the state before using npm run deploy.
 unset CLOUDFLARE_API_TOKEN
 ```
 
 ## Failure policy
 
-The deploy tool fails closed on malformed configuration, ambiguous D1 names, failed migrations, missing schema tables, rejected Worker upload, or a bad post-deploy HTTP smoke test.
+The deploy tool fails closed on malformed configuration, ambiguous D1 names, failed migrations, partial/ambiguous Phase 4 migration state, missing schema tables, rejected Worker upload, or a bad post-deploy HTTP smoke test.
 
 It does not automatically delete or roll back Cloudflare resources. If direct deployment becomes brittle or grows into a home-made Cloudflare CLI, stop and use the isolated Wrangler fallback described in ADR 0006.
