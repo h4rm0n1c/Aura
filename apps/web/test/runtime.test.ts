@@ -120,7 +120,9 @@ test("admin invitation and user pages route through authenticated runtime", asyn
     { access },
   );
   assert.equal(invites.status, 200);
-  assert.match(await invites.text(), /Create member invitation/);
+  const inviteHtml = await invites.text();
+  assert.match(inviteHtml, /Create DM invite link/);
+  assert.match(inviteHtml, /Create email-bound invitation/);
 
   const users = await handleAuraWebRequest(
     new Request("https://aura.example/admin/users"),
