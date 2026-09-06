@@ -72,17 +72,24 @@ export function authorizeHumanAdministration(principal: Principal): Authorizatio
  * Change staff on one board.
  *
  * Site admins may grant/revoke either board role. A board manager may only
- * grant/revoke board-moderator authority; manager authority remains site-admin
- * controlled so local managers cannot expand their own privilege tier.
+ * create/change/remove moderator-only rows. If manager authority is present
+ * on either side of the change, a site administrator is required.
  */
 export function authorizeBoardStaffChange(
   principal: Principal,
   actorBoardRole: BoardStaffRole | null,
-  targetRole: BoardStaffRole,
+  currentTargetRole: BoardStaffRole | null,
+  nextTargetRole: BoardStaffRole | null,
 ): AuthorizationResult {
   if (principal.kind !== "human") return deny("forbidden");
   if (humanHasRole(principal, "admin")) return ALLOW;
-  if (actorBoardRole === "manager" && targetRole === "moderator") return ALLOW;
+  if (
+    actorBoardRole === "manager" &&
+    currentTargetRole !== "manager" &&
+    nextTargetRole !== "manager"
+  ) {
+    return ALLOW;
+  }
   return deny("forbidden");
 }
 
