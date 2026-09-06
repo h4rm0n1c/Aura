@@ -35,6 +35,7 @@ export interface HumanPrincipal {
 export interface AgentPrincipal {
   readonly kind: "agent";
   readonly agentId: string;
+  readonly ownerHumanId: string;
   readonly credentialId: string;
   readonly capabilities: readonly AgentCapability[];
 }
