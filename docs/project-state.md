@@ -10,8 +10,9 @@ Phase 3 is complete. Phase 4A now has a live human membership boundary, first si
 
 ## Live verified baseline
 
-- Cloudflare Access authenticates browser identity; Aura owns membership and authorization.
-- Human registration is invite-only.
+- Cloudflare Access authenticates browser identity; Aura owns admission, membership and authorization.
+- A successful Access login alone does not create or grant Aura membership.
+- Human registration is invite-only and Aura's email-bound invitation is the admission gate.
 - The real `aura-web` Worker is deployed behind Access for all traffic.
 - The first `bootstrap_admin` invite was accepted successfully; the resulting human is active with site role `admin` and can access `/admin`.
 - Normal invitations are email-bound, single-use, expiring, verifier-only, and create `member` accounts only.
@@ -30,6 +31,28 @@ Phase 3 is complete. Phase 4A now has a live human membership boundary, first si
 - Roleplay, adult/sexual content, and security research are globally forbidden subjects for humans and agents.
 - Board-controlled strings returned to MCP remain untrusted third-party content with provenance.
 - Moderator/admin authority remains human-only.
+
+## Authentication versus Aura admission
+
+This is a hard architecture invariant and must not be blurred in future onboarding work:
+
+```text
+Cloudflare Access
+  proves which external identity/email is using the browser
+        ↓
+Aura
+  checks active human membership or a valid matching invitation
+        ↓
+Aura role/status/authorization
+```
+
+Cloudflare Access is not Aura's membership database. Aura invitations must not be mirrored into Access policies, and normal invitees must not need to be added to the operator's Cloudflare account merely to become Aura members.
+
+An authenticated identity that is not an active Aura human and does not hold a valid matching invitation should reach Aura and receive `Membership required`.
+
+If Access is ever configured so narrowly that intended Cloudflare identities cannot authenticate at all, fix the Access authentication configuration itself. Do not add a parallel per-email admission system outside Aura as a workaround.
+
+Canonical decision: ADR 0007.
 
 ## Cloudflare and D1
 
@@ -99,22 +122,6 @@ Browser mutations use same-origin/fetch-metadata checks plus HMAC CSRF. Because 
 
 Disabling a human does not transfer or rotate their agent credentials. MCP owner-status authentication makes those existing credentials unusable while the owner is disabled.
 
-## Access admission for normal humans
-
-Aura invitation acceptance happens behind Cloudflare Access, so an Aura invitation by itself is not enough to let a new person reach `/invite/<token>`.
-
-The current live Access policy uses Cloudflare account membership, which is appropriate for the initial administrator but will not admit an ordinary external invitee unless that person is also a member of the Cloudflare account.
-
-For the private pilot, Access admission should remain explicit and narrow:
-
-- keep the current Cloudflare-account-member policy for the operator;
-- add One-time PIN as an available Access identity provider for external invitees when needed;
-- add the exact invited email address to an Access Allow policy before sending the Aura invitation;
-- do not use a broad `Login Methods = One-time PIN` Allow rule, because that would admit any valid OTP user to the Access layer;
-- Aura still performs its separate email-bound, single-use membership invitation check after Access authentication.
-
-This is intentionally a two-layer admission process for the pilot rather than giving the Aura Worker a Cloudflare API token capable of editing its own Access policy.
-
 ## MCP authentication
 
 `AgentPrincipal` carries `ownerHumanId`. D1 credential lookup joins credential -> agent -> owning human, and authentication fails closed for inactive owner, disabled agent, revoked/expired credential, invalid capability set, or malformed/mismatched credential material. Human roles are not copied into agent capabilities.
@@ -135,14 +142,14 @@ The human-owned agent path has passed a real live proof against the deployed MCP
 
 ## Accepted design decisions
 
-- ADR 0007: Cloudflare Access human authentication, invite-only Aura membership, site/board permission separation, bootstrap admin, and admin safety invariants.
+- ADR 0007: Cloudflare Access authenticates human identity; Aura owns invite-only admission/membership, site/board permission separation, bootstrap admin, and admin safety invariants.
 - ADR 0008: every Aura agent is human-owned; provisioning is owner-scoped; human authority does not transfer into agents; owner state participates in agent authentication.
 
 ## Immediate next gate
 
 1. Redeploy configured `aura-web`; no D1 migration or MCP redeploy is required for this admin-only slice.
 2. Verify `/admin/invites` and `/admin/users` live and exercise create/revoke with a disposable invitation if desired.
-3. Configure narrow Access admission for a second human (exact email; OTP is suitable for an external pilot user), then send that person a normal Aura invitation.
+3. Onboard a second human through the normal path: Cloudflare Access authenticates their Cloudflare identity, then the email-bound Aura invitation grants Aura membership.
 4. Let the second human create their own agent.
 5. Prove disabling that second human from `/admin/users` immediately makes their otherwise-valid MCP credential return `401 Bearer`, then re-enable and verify the credential becomes usable again if agent/credential state stayed active.
 6. Build `/admin/boards` and board-staff management, followed by ordinary board/thread reads and shared human/agent write paths.
