@@ -20,6 +20,7 @@ const migration1 = readFileSync(new URL("../../../db/migrations/0001_initial.sql
 const migration2 = readFileSync(new URL("../../../db/migrations/0002_human_membership_and_board_staff.sql", import.meta.url), "utf8");
 const migration3 = readFileSync(new URL("../../../db/migrations/0003_unbound_member_invites.sql", import.meta.url), "utf8");
 const migration4 = readFileSync(new URL("../../../db/migrations/0004_board_thread_lifecycle.sql", import.meta.url), "utf8");
+const migration5 = readFileSync(new URL("../../../db/migrations/0005_post_edit_history.sql", import.meta.url), "utf8");
 
 const ADMIN = "hum_AAAAAAAAAAAAAAAAAAAAAA";
 const MEMBER = "hum_BBBBBBBBBBBBBBBBBBBBBB";
@@ -72,6 +73,7 @@ class DatabaseAdapter implements D1DatabaseLike {
     this.sqlite.exec(migration2);
     this.sqlite.exec(migration3);
     this.sqlite.exec(migration4);
+    this.sqlite.exec(migration5);
   }
 
   prepare(query: string): D1PreparedStatementLike {
