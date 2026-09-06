@@ -75,7 +75,7 @@ Short chronological notes for non-trivial repository changes.
 - Human status changes rely on the existing database last-active-admin triggers, and disabled human owners immediately fail MCP credential authentication without transferring ownership or minting replacement credentials.
 - Added compact table/select UI, dedicated admin service/route tests, and runtime routing coverage.
 - No D1 migration is required for this slice.
-- Operator-host verification now passes **79 tests, 79 passed, 0 failed**, clearing the local gate for `aura-web` redeployment.
+- Operator-host verification reached **79 tests, 79 passed, 0 failed**, clearing the local gate for the first admin UI redeploy.
 
 ## 2026-09-06 — authentication/admission boundary clarified
 
@@ -84,3 +84,15 @@ Short chronological notes for non-trivial repository changes.
 - A successful Access login may still end at Aura's `Membership required` page; that is expected for an authenticated non-member without a valid invitation.
 - Normal Aura invitations must not be mirrored into per-email Access policies, must not require adding invitees to the operator's Cloudflare account, and must not create a second admission allowlist outside Aura.
 - If Access cannot authenticate the intended class of Cloudflare identities, correct the Access authentication configuration itself rather than moving Aura membership logic into Access.
+
+## 2026-09-06 — DM invite links
+
+- Added a second normal-member invitation mode for cases where the administrator wants to DM a link without knowing which Cloudflare email the recipient uses.
+- Email-bound invitations remain available as the stricter option.
+- Unbound DM links store `email = NULL`; the first Cloudflare-authenticated identity to redeem the valid unused token becomes the Aura member.
+- DM links remain one-time, expiring, revocable, member-only, and verifier-only. Bootstrap-admin invitations remain email-bound.
+- Added migration `0003_unbound_member_invites.sql` to rebuild the invitation table while preserving existing rows and safety triggers/indexes.
+- Added UI, acceptance logic, migration coverage, and explicit documentation of the bearer-link security property.
+- Two stale tests initially asserted against the wrong UI wording or allowed the empty-instance bootstrap trigger to mask the intended CHECK constraint; both were corrected by isolating the test conditions.
+- Migration parser check passes with `0003` present.
+- Current operator-host verification passes **81 tests, 81 passed, 0 failed**. Migration `0003` and the corresponding web build are ready for live deployment; MCP does not require redeployment for this slice.
