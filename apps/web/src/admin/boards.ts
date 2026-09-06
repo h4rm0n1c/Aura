@@ -328,12 +328,12 @@ export async function getBoardStaffPageData(
   let rows: readonly StaffCandidateRow[];
   try {
     const result = await db.prepare(`
-      SELECT h.id, h.display_name, h.role, h.status, s.role AS board_role
+      SELECT h.id, COALESCE(h.display_name, h.email) AS display_name, h.role, h.status, s.role AS board_role
       FROM humans h
       LEFT JOIN board_staff s ON s.board_id = ?1 AND s.human_id = h.id
       WHERE h.status = 'active' OR s.role IS NOT NULL
       ORDER BY CASE WHEN s.role = 'manager' THEN 0 WHEN s.role = 'moderator' THEN 1 ELSE 2 END,
-               COALESCE(h.display_name, h.id) COLLATE NOCASE,
+               COALESCE(h.display_name, h.email, h.id) COLLATE NOCASE,
                h.id
     `).bind(boardId).all<StaffCandidateRow>();
     rows = result.results ?? [];
@@ -522,7 +522,7 @@ function parseManagementBoard(row: BoardRow): BoardManagementSummary | null {
 function parseStaffCandidate(row: StaffCandidateRow): BoardStaffCandidate | null {
   if (
     !isAuraId("human", row.id) ||
-    !(row.display_name === null || (typeof row.display_name === "string" && row.display_name.length <= 256)) ||
+    !(row.display_name === null || (typeof row.display_name === "string" && row.display_name.length <= 320)) ||
     !isHumanRole(row.role) ||
     (row.status !== "active" && row.status !== "disabled") ||
     !(row.board_role === null || isBoardStaffRole(row.board_role))
