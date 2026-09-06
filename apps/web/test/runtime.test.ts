@@ -111,3 +111,25 @@ test("admin route is server-authorized and ordinary members are denied", async (
   assert.match(html, /Administration/);
   assert.match(html, /Invitations/);
 });
+
+test("same-origin form POST survives no-referrer Origin null but still requires CSRF", async () => {
+  const token = `aura.invite.v1.${"A".repeat(16)}.${"B".repeat(43)}`;
+  const response = await handleAuraWebRequest(
+    new Request(`https://aura.example/invite/${token}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Origin": "null",
+        "Sec-Fetch-Site": "same-origin",
+      },
+      body: "csrf=invalid",
+    }),
+    env("member"),
+    { access },
+  );
+
+  assert.equal(response.status, 403);
+  const body = await response.text();
+  assert.match(body, /Form expired/);
+  assert.doesNotMatch(body, /Cross-origin form submission rejected/);
+});
