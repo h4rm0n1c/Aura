@@ -37,9 +37,14 @@ test("migration 0003 preserves existing invites and permits verifier-only unboun
     (invite_id, secret_verifier, email, kind, initial_role, status, created_by_human_id, created_at, expires_at)
     VALUES (?, ?, NULL, 'member', 'member', 'pending', ?, 3, 3603)`).run(INVITE2, VERIFIER, ADMIN);
   assert.equal((db.prepare("SELECT email FROM human_invites WHERE invite_id=?").get(INVITE2) as { email: string | null }).email, null);
+  db.close();
 
-  assert.throws(() => db.prepare(`INSERT INTO human_invites
+  // Check the bootstrap binding constraint on a separate empty instance so the
+  // existing bootstrap-empty trigger does not mask the CHECK we intend to test.
+  const empty = openDatabase();
+  empty.exec(migration3);
+  assert.throws(() => empty.prepare(`INSERT INTO human_invites
     (invite_id, secret_verifier, email, kind, initial_role, status, created_at, expires_at)
     VALUES ('CCCCCCCCCCCCCCCC', ?, NULL, 'bootstrap_admin', 'admin', 'pending', 4, 3604)`).run(VERIFIER), /CHECK/);
-  db.close();
+  empty.close();
 });
