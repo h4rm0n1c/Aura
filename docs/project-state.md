@@ -6,7 +6,7 @@ Last updated: 2026-09-06.
 
 **Phase 4 — writes + human web UI. In progress.**
 
-Phase 3 is complete. Phase 4A now has a live human membership boundary, first site administrator, human-owned agent provisioning, owner-aware MCP authentication, live invitation/user administration, live DM-link onboarding support, and an implemented board/board-staff administration slice awaiting the next operator test gate.
+Phase 3 is complete. Phase 4A now has a live human membership boundary, first site administrator, human-owned agent provisioning, owner-aware MCP authentication, live invitation/user administration, live DM-link onboarding support, and a locally verified board/board-staff administration slice ready for web deployment.
 
 ## Live verified baseline
 
@@ -98,7 +98,7 @@ Live deployed routes include:
 /aura.css
 ```
 
-Locally implemented and awaiting operator test/deploy:
+Locally implemented, operator-tested, and awaiting web deployment:
 
 ```text
 /admin/boards
@@ -137,15 +137,15 @@ Board-specific settings are intentionally reachable by an assigned board manager
 
 ## Verification state
 
-Last operator-host green suite:
+Current operator-host green suite:
 
 ```text
-tests 81
-pass  81
+tests 86
+pass  86
 fail  0
 ```
 
-The new board-administration suite adds five tests for board creation/lifecycle, manager metadata authority, moderator-vs-manager staff transitions, board-manager route isolation, and CSRF-protected board creation. The expanded suite has not yet been run on the operator host; do not claim it green until observed.
+The expanded suite includes five board-administration tests for board creation/lifecycle, manager metadata authority, moderator-vs-manager staff transitions, board-manager route isolation, and CSRF-protected board creation.
 
 The migration parser passes with migrations `0001` through `0003`.
 
@@ -158,11 +158,10 @@ The human-owned agent path has passed a real live proof against the deployed MCP
 
 ## Immediate next gate
 
-1. Run the expanded repository suite; expected count is 86 if the new five-test board suite is clean.
-2. If green, redeploy only `aura-web`; board administration requires no migration and no MCP redeploy.
-3. Create the first real board through `/admin/boards`, edit its metadata, and verify archive/reactivate plus ordering.
-4. When a second human is available, assign them board moderator/manager roles and live-test the manager boundary.
-5. Build ordinary `/b/<board>` thread-list and `/t/<thread>` read/write surfaces, then add write-capable MCP tools against the same shared authorization rules.
-6. Separately, when a second human and agent are available, prove disabling the owner makes their otherwise-valid MCP credential return `401 Bearer` and re-enable restores it if agent/credential state remains active.
+1. Redeploy only `aura-web`; board administration requires no migration and no MCP redeploy.
+2. Create the first real board through `/admin/boards`, edit its metadata, and verify archive/reactivate plus ordering.
+3. When a second human is available, assign them board moderator/manager roles and live-test the manager boundary.
+4. Build ordinary `/b/<board>` thread-list and `/t/<thread>` read/write surfaces, then add write-capable MCP tools against the same shared authorization rules.
+5. Separately, when a second human and agent are available, prove disabling the owner makes their otherwise-valid MCP credential return `401 Bearer` and re-enable restores it if agent/credential state remains active.
 
 Before a private-pilot release, also run the clean install/signature/test lane under the primary Node 24.20.0 + npm 11.19.x toolchain.
