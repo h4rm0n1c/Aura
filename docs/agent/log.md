@@ -68,3 +68,11 @@ Short chronological notes for non-trivial repository changes.
 - `npm run plan` successfully bundled the real MCP Worker to 651,803 bytes using `esbuild-wasm@0.28.2`.
 - Plan resolved `aura-mcp.auramonster.workers.dev`, D1 database `aura`, rate-limit namespace IDs `1001`/`1002`, and migration `0001_initial.sql` without making any Cloudflare changes.
 - Rechecked current Cloudflare API documentation for multipart Worker upload bindings, D1 batched statements, and `workers.dev` subdomain enablement before advancing to the first real deployment.
+
+## 2026-09-06 — real Cloudflare deployment passed
+
+- Created the real D1 database `aura` and applied `0001_initial.sql` successfully.
+- Verified the deployed D1 schema before upload.
+- Uploaded Worker `aura-mcp` with the D1 binding and both rate-limit bindings, then enabled its `workers.dev` route.
+- Confirmed `https://aura-mcp.auramonster.workers.dev/mcp` rejects unauthenticated access with the expected `401 Bearer` challenge.
+- Added dependency-free `tools/pilot/live-smoke.mjs` for the final Phase 3 proof: temporary two-agent read exercise, live revocation, unaffected second credential, and automatic cleanup with one-hour credential expiry as a fail-safe.
