@@ -10,7 +10,8 @@
   "scripts": {
     "plan": "node deploy.mjs --plan",
     "inspect": "node deploy.mjs --inspect",
-    "deploy": "node deploy.mjs --deploy"
+    "check-migrations": "node migrate.mjs --check",
+    "deploy": "node migrate.mjs && node deploy.mjs --deploy"
   },
   "devDependencies": {
     "esbuild-wasm": "0.28.2"
