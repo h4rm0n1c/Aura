@@ -65,8 +65,9 @@ nav a { text-decoration: none; border-bottom: 2px solid transparent; }
 nav a:hover { border-bottom-color: var(--line-strong); }
 .identity { margin-left: auto; color: var(--muted); font-size: .9rem; }
 .board-strip { display: block; border-bottom: 1px solid var(--line); background: var(--panel-soft); }
-.board-strip-inner { max-width: 1080px; margin: 0 auto; padding: .26rem .8rem .3rem; overflow-x: auto; white-space: nowrap; font-size: .82rem; scrollbar-width: thin; }
-.board-strip-label { color: var(--muted); margin-right: .45rem; }
+.board-strip-inner { max-width: 1080px; margin: 0 auto; padding: .26rem .8rem .3rem; overflow-x: auto; font-size: .82rem; scrollbar-width: thin; }
+.board-strip-track { width: max-content; min-width: 100%; white-space: nowrap; text-align: center; }
+.board-strip-label { display: inline-block; color: var(--muted); margin-right: .55rem; }
 .board-strip a { border-bottom: 0; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-weight: 700; }
 .board-strip a:hover { text-decoration: underline; }
 .board-strip a[aria-current="page"] { color: var(--text); font-weight: 900; text-decoration: underline; }
@@ -152,6 +153,7 @@ td form.inline { display: inline-flex; gap: .35rem; align-items: center; margin:
 body > footer { max-width: 1080px; margin: 1rem auto; padding: 0 .8rem 1rem; color: var(--muted); font-size: .85rem; }
 @media (max-width: 640px) {
   .identity { margin-left: 0; width: 100%; }
+  .board-strip-track { min-width: max-content; text-align: left; }
   dl { grid-template-columns: 1fr; }
   dd { margin-bottom: .35rem; }
   .forum-actions { width: 100%; }
@@ -182,7 +184,7 @@ export function htmlPage(
   const boards = principal === null ? [] : options.boards ?? [];
   const boardStrip = boards.length === 0
     ? ""
-    : `<nav class="board-strip" aria-label="Boards"><div class="board-strip-inner"><span class="board-strip-label">Boards</span>${boards.map((board, index) => `${index === 0 ? "" : `<span class="board-strip-sep">/</span>`}<a href="/b/${escapeHtml(board.slug)}" title="${escapeHtml(board.title)}"${options.activeBoardSlug === board.slug ? ` aria-current="page"` : ""}>/${escapeHtml(board.slug)}/</a>`).join("")}</div></nav>`;
+    : `<nav class="board-strip" aria-label="Boards"><div class="board-strip-inner"><div class="board-strip-track"><span class="board-strip-label">Boards</span>${boards.map((board, index) => `${index === 0 ? "" : `<span class="board-strip-sep">/</span>`}<a href="/b/${escapeHtml(board.slug)}" title="${escapeHtml(board.title)}"${options.activeBoardSlug === board.slug ? ` aria-current="page"` : ""}>/${escapeHtml(board.slug)}/</a>`).join("")}</div></div></nav>`;
   const html = `<!doctype html>
 <html lang="en">
 <head>
@@ -213,7 +215,7 @@ export function cssResponse(): Response {
     status: 200,
     headers: {
       "Content-Type": "text/css; charset=utf-8",
-      "Cache-Control": "public, max-age=3600",
+      "Cache-Control": "no-cache",
     },
   }));
 }
