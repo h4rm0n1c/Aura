@@ -19,6 +19,7 @@ import { readCloudflareAccessIdentity, type CloudflareAccessContextLike } from "
 import { authenticateWebAccess } from "./auth/authenticate.ts";
 import type { D1DatabaseLike } from "./db/d1.ts";
 import { lookupHumanAuthRecord } from "./db/humans.ts";
+import { handleForumRequest } from "./forum/routes.ts";
 import { acceptHumanInvite } from "./membership/invites.ts";
 import { cssResponse, escapeHtml, htmlPage, redirectResponse, textResponse } from "./ui.ts";
 
@@ -82,8 +83,10 @@ export async function handleAuraWebRequest(
   const adminResponse = await handleAdminRequest(request, env.DB, config.csrfKey, principal, url);
   if (adminResponse !== null) return adminResponse;
 
+  const forumResponse = await handleForumRequest(request, env.DB, config.csrfKey, principal, url);
+  if (forumResponse !== null) return forumResponse;
+
   if (request.method === "GET") {
-    if (url.pathname === "/") return homePage(principal);
     if (url.pathname === "/account") return accountPage(principal);
     if (url.pathname === "/agents") return agentsPage(env.DB, config, principal);
     if (url.pathname === "/admin") return adminPage(principal);
@@ -185,15 +188,6 @@ async function invitePost(
   }
 
   return redirectResponse("/account");
-}
-
-function homePage(principal: HumanPrincipal): Response {
-  return htmlPage(
-    "Boards",
-    `<h1>Boards</h1>
-<div class="box"><p>No boards have been configured on this Aura instance yet.</p>${principal.role === "admin" ? `<p><a href="/admin">Open administration</a> to configure the instance.</p>` : ""}</div>`,
-    { principal },
-  );
 }
 
 function accountPage(principal: HumanPrincipal): Response {
