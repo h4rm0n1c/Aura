@@ -76,4 +76,11 @@ Short chronological notes for non-trivial repository changes.
 - Added compact table/select UI, dedicated admin service/route tests, and runtime routing coverage.
 - No D1 migration is required for this slice.
 - Operator-host verification now passes **79 tests, 79 passed, 0 failed**, clearing the local gate for `aura-web` redeployment.
-- Before onboarding an external second human, the Access layer must admit that identity as well as Aura. The current Cloudflare-account-member policy only admits account members; for the private pilot, keep that policy for the operator and add narrow exact-email admission for invitees, using One-time PIN as an external login method when needed rather than a broad OTP-login-method Allow rule.
+
+## 2026-09-06 — authentication/admission boundary clarified
+
+- Corrected an overcomplicated onboarding interpretation that tried to duplicate Aura invitations in Cloudflare Access.
+- Reasserted ADR 0007 as the canonical boundary: Cloudflare Access authenticates external identity; Aura alone decides invite validity, membership, role, status, and application authorization.
+- A successful Access login may still end at Aura's `Membership required` page; that is expected for an authenticated non-member without a valid invitation.
+- Normal Aura invitations must not be mirrored into per-email Access policies, must not require adding invitees to the operator's Cloudflare account, and must not create a second admission allowlist outside Aura.
+- If Access cannot authenticate the intended class of Cloudflare identities, correct the Access authentication configuration itself rather than moving Aura membership logic into Access.
