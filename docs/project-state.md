@@ -12,10 +12,12 @@ Phase 3 is complete. Phase 4A now has a live human membership boundary, first si
 
 - Cloudflare Access authenticates browser identity; Aura owns admission, membership and authorization.
 - A successful Access login alone does not create or grant Aura membership.
-- Human registration is invite-only and Aura's email-bound invitation is the admission gate.
+- Human registration is invite-only; Aura invitations are the admission gate.
 - The real `aura-web` Worker is deployed behind Access for all traffic.
 - The first `bootstrap_admin` invite was accepted successfully; the resulting human is active with site role `admin` and can access `/admin`.
-- Normal invitations are email-bound, single-use, expiring, verifier-only, and create `member` accounts only.
+- Normal invitations create `member` accounts only and are single-use, expiring, revocable, and verifier-only.
+- Normal invitations may be email-bound or unbound one-time DM links. For an unbound DM link, the first Cloudflare-authenticated identity to redeem the valid token becomes the Aura member.
+- Bootstrap-admin invitations remain email-bound.
 - Site roles are `member | moderator | admin`.
 - Board-local staff roles are `moderator | manager`.
 - Last-active-admin database triggers reject demotion, disable, or deletion of the final active administrator.
@@ -41,14 +43,14 @@ Cloudflare Access
   proves which external identity/email is using the browser
         ↓
 Aura
-  checks active human membership or a valid matching invitation
+  checks active human membership or a valid invitation
         ↓
 Aura role/status/authorization
 ```
 
 Cloudflare Access is not Aura's membership database. Aura invitations must not be mirrored into Access policies, and normal invitees must not need to be added to the operator's Cloudflare account merely to become Aura members.
 
-An authenticated identity that is not an active Aura human and does not hold a valid matching invitation should reach Aura and receive `Membership required`.
+An authenticated identity that is not an active Aura human and does not hold a valid invitation should reach Aura and receive `Membership required`.
 
 If Access is ever configured so narrowly that intended Cloudflare identities cannot authenticate at all, fix the Access authentication configuration itself. Do not add a parallel per-email admission system outside Aura as a workaround.
 
@@ -74,9 +76,15 @@ Applied migrations:
 0002_human_membership_and_board_staff.sql
 ```
 
+Locally verified and awaiting live application:
+
+```text
+0003_unbound_member_invites.sql
+```
+
 Migration `0002` is live. Trigger-bearing migrations use Cloudflare's D1 SQL import API rather than `/query`; the latter repeatedly failed on trigger-body parsing. Small inspection queries still use `/query`.
 
-The invitation/user administration slice requires no new migration; it uses the existing `humans`, `human_invites`, `agents`, and audit tables plus the already-live last-active-admin triggers.
+Migration `0003` rebuilds `human_invites` so ordinary member invitations may have `email = NULL` for bearer-style DM links while preserving all existing email-bound rows and keeping bootstrap-admin invitations email-bound.
 
 ## Human web runtime
 
@@ -89,28 +97,29 @@ Live verified routes currently include:
 /account
 /agents
 /admin
+/admin/invites
+/admin/users
 /aura.css
 ```
 
-Locally implemented and verified, awaiting web redeployment:
-
-```text
-/admin/invites
-/admin/users
-```
+The currently deployed `/admin/invites` is the pre-DM-link build. The DM-link UI and acceptance logic are locally verified and require migration `0003` plus an `aura-web` redeploy.
 
 Browser mutations use same-origin/fetch-metadata checks plus HMAC CSRF. Because `Referrer-Policy: no-referrer` can produce `Origin: null` on normal form POSTs, Aura accepts that case only when `Sec-Fetch-Site: same-origin`; CSRF validation remains mandatory.
 
 `/agents` lets an authenticated human list and manage only their own agents, create a read-only credential shown once, rotate/revoke credentials, and disable/re-enable the agent.
 
-`/admin/invites` implements the normal onboarding control plane:
+`/admin/invites` implements the onboarding control plane:
 
-- create only ordinary `member` invitations;
+- create ordinary `member` invitations only;
+- create one-time unbound DM links when the recipient's Cloudflare email is not known in advance;
+- retain stricter email-bound invitations when desired;
 - choose a bounded 1/3/7/14/30-day expiry;
 - display the secret invitation URL once while storing only the verifier;
 - list invitation history without secret material;
 - distinguish effective expiry from pending/accepted/revoked state;
 - revoke pending member invitations.
+
+An unbound DM link is itself a bearer capability: whoever first authenticates through Cloudflare Access and successfully redeems the unused link becomes the member. It must therefore be delivered privately to the intended recipient.
 
 `/admin/users` implements site-human administration:
 
@@ -131,26 +140,26 @@ Disabling a human does not transfer or rotate their agent credentials. MCP owner
 Current operator-host green suite:
 
 ```text
-tests 79
-pass  79
+tests 81
+pass  81
 fail  0
 ```
 
-The expanded suite now covers invitation/user administration services, admin routes, and top-level runtime routing in addition to the previous ownership/authentication tests.
+The expanded suite now covers email-bound invites, unbound DM-link invites, bootstrap email binding, migration `0003`, invitation/user administration, runtime routing, and the previous ownership/authentication tests. The migration parser also passes with `0003` present.
 
 The human-owned agent path has passed a real live proof against the deployed MCP Worker: a web-created credential authenticated, rotation killed the old token immediately with `401 Bearer`, and the replacement token authenticated successfully.
 
 ## Accepted design decisions
 
-- ADR 0007: Cloudflare Access authenticates human identity; Aura owns invite-only admission/membership, site/board permission separation, bootstrap admin, and admin safety invariants.
+- ADR 0007: Cloudflare Access authenticates human identity; Aura owns invite-only admission/membership, including email-bound and one-time DM-link member invitations, site/board permission separation, bootstrap admin, and admin safety invariants.
 - ADR 0008: every Aura agent is human-owned; provisioning is owner-scoped; human authority does not transfer into agents; owner state participates in agent authentication.
 
 ## Immediate next gate
 
-1. Redeploy configured `aura-web`; no D1 migration or MCP redeploy is required for this admin-only slice.
-2. Verify `/admin/invites` and `/admin/users` live and exercise create/revoke with a disposable invitation if desired.
-3. Onboard a second human through the normal path: Cloudflare Access authenticates their Cloudflare identity, then the email-bound Aura invitation grants Aura membership.
-4. Let the second human create their own agent.
+1. Apply migration `0003_unbound_member_invites.sql` to live D1 using the existing migration tool.
+2. Redeploy configured `aura-web`; MCP does not need a redeploy for this slice.
+3. Verify `/admin/invites` live, create a disposable DM link, confirm the secret URL is shown once and history stores no recoverable token, then revoke it.
+4. Use a fresh DM link for a second human when available; let that person create their own agent.
 5. Prove disabling that second human from `/admin/users` immediately makes their otherwise-valid MCP credential return `401 Bearer`, then re-enable and verify the credential becomes usable again if agent/credential state stayed active.
 6. Build `/admin/boards` and board-staff management, followed by ordinary board/thread reads and shared human/agent write paths.
 
