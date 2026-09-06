@@ -17,7 +17,8 @@ const DEFAULT_INVITE_TTL_SECONDS = 7 * 24 * 60 * 60;
 
 export interface CreatedMemberInvite {
   readonly inviteId: string;
-  readonly email: string;
+  readonly email: string | null;
+  readonly binding: "email" | "link";
   readonly token: string;
   readonly expiresAt: number;
 }
@@ -44,7 +45,7 @@ interface InviteRow {
 interface ParsedInviteRow {
   readonly inviteId: string;
   readonly verifier: string;
-  readonly email: string;
+  readonly email: string | null;
   readonly kind: "member" | "bootstrap_admin";
   readonly role: "member" | "admin";
   readonly status: "pending" | "accepted" | "revoked";
@@ -58,18 +59,37 @@ export async function createMemberInvite(
   nowSeconds: number,
   ttlSeconds = DEFAULT_INVITE_TTL_SECONDS,
 ): Promise<InviteResult<CreatedMemberInvite>> {
+  const email = normalizeInviteEmail(emailInput);
+  if (email === null) return fail("validation_error");
+  return createMemberInviteRecord(db, principal, email, nowSeconds, ttlSeconds);
+}
+
+export async function createMemberLinkInvite(
+  db: D1DatabaseLike,
+  principal: HumanPrincipal,
+  nowSeconds: number,
+  ttlSeconds = DEFAULT_INVITE_TTL_SECONDS,
+): Promise<InviteResult<CreatedMemberInvite>> {
+  return createMemberInviteRecord(db, principal, null, nowSeconds, ttlSeconds);
+}
+
+async function createMemberInviteRecord(
+  db: D1DatabaseLike,
+  principal: HumanPrincipal,
+  email: string | null,
+  nowSeconds: number,
+  ttlSeconds: number,
+): Promise<InviteResult<CreatedMemberInvite>> {
   const authorized = authorizeInviteAdministration(principal);
   if (!authorized.ok) return authorized;
   if (!validTimestamp(nowSeconds) || !Number.isSafeInteger(ttlSeconds) || ttlSeconds < 60 || ttlSeconds > 30 * 24 * 60 * 60) {
     return fail("validation_error");
   }
 
-  const email = normalizeInviteEmail(emailInput);
-  if (email === null) return fail("validation_error");
-
   const created = await createHumanInviteToken();
   const expiresAt = nowSeconds + ttlSeconds;
   if (!Number.isSafeInteger(expiresAt)) return fail("validation_error");
+  const binding = email === null ? "link" : "email";
 
   try {
     const results = await db.batch([
@@ -83,8 +103,8 @@ export async function createMemberInvite(
         INSERT INTO audit_events
           (occurred_at, actor_kind, actor_human_id, action, target_kind, target_id, metadata_json)
         VALUES (?1, 'human', ?2, 'human_invite_created', 'invite', ?3,
-                json_object('kind', 'member'))
-      `).bind(nowSeconds, principal.humanId, created.inviteId),
+                json_object('kind', 'member', 'binding', ?4))
+      `).bind(nowSeconds, principal.humanId, created.inviteId, binding),
     ]);
     if (resultChanges(results[0]) !== 1 || resultChanges(results[1]) !== 1) {
       return fail("internal_error");
@@ -98,6 +118,7 @@ export async function createMemberInvite(
     value: Object.freeze({
       inviteId: created.inviteId,
       email,
+      binding,
       token: created.token,
       expiresAt,
     }),
@@ -134,7 +155,7 @@ export async function acceptHumanInvite(
   if (
     identity.provider !== "cloudflare_access" ||
     identityEmail === null ||
-    identityEmail !== invite.email ||
+    (invite.email !== null && identityEmail !== invite.email) ||
     invite.status !== "pending" ||
     invite.expiresAt <= nowSeconds ||
     !(await verifyHumanInviteToken(token, invite.verifier))
@@ -167,7 +188,7 @@ export async function acceptHumanInvite(
         FROM human_invites
         WHERE invite_id = ?6
           AND secret_verifier = ?7
-          AND email = ?3
+          AND (email IS NULL OR email = ?3)
           AND status = 'pending'
           AND expires_at > ?5
       `).bind(
@@ -184,7 +205,7 @@ export async function acceptHumanInvite(
         SET status = 'accepted', accepted_by_human_id = ?1, accepted_at = ?2
         WHERE invite_id = ?3
           AND secret_verifier = ?4
-          AND email = ?5
+          AND (email IS NULL OR email = ?5)
           AND status = 'pending'
           AND expires_at > ?2
           AND EXISTS (
@@ -205,7 +226,8 @@ export async function acceptHumanInvite(
         INSERT INTO audit_events
           (occurred_at, actor_kind, actor_human_id, action, target_kind, target_id, metadata_json)
         SELECT ?1, 'human', ?2, 'human_invite_accepted', 'human', ?2,
-               json_object('invite_id', invite_id, 'kind', kind)
+               json_object('invite_id', invite_id, 'kind', kind,
+                           'binding', CASE WHEN email IS NULL THEN 'link' ELSE 'email' END)
         FROM human_invites
         WHERE invite_id = ?3
           AND status = 'accepted'
@@ -254,7 +276,8 @@ export async function revokeMemberInvite(
         INSERT INTO audit_events
           (occurred_at, actor_kind, actor_human_id, action, target_kind, target_id, metadata_json)
         SELECT ?1, 'human', ?2, 'human_invite_revoked', 'invite', invite_id,
-               json_object('kind', kind)
+               json_object('kind', kind,
+                           'binding', CASE WHEN email IS NULL THEN 'link' ELSE 'email' END)
         FROM human_invites
         WHERE invite_id = ?3
           AND kind = 'member'
@@ -274,13 +297,18 @@ export async function revokeMemberInvite(
 }
 
 function parseInviteRow(row: InviteRow): ParsedInviteRow | null {
+  const email = row.email === null
+    ? null
+    : typeof row.email === "string" && normalizeInviteEmail(row.email) === row.email
+      ? row.email
+      : undefined;
+
   if (
     typeof row.invite_id !== "string" ||
     !/^[A-Za-z0-9_-]{16}$/.test(row.invite_id) ||
     typeof row.secret_verifier !== "string" ||
     !/^[0-9a-f]{64}$/.test(row.secret_verifier) ||
-    typeof row.email !== "string" ||
-    normalizeInviteEmail(row.email) !== row.email ||
+    email === undefined ||
     (row.kind !== "member" && row.kind !== "bootstrap_admin") ||
     (row.initial_role !== "member" && row.initial_role !== "admin") ||
     (row.status !== "pending" && row.status !== "accepted" && row.status !== "revoked") ||
@@ -290,14 +318,14 @@ function parseInviteRow(row: InviteRow): ParsedInviteRow | null {
   }
   if (
     (row.kind === "member" && row.initial_role !== "member") ||
-    (row.kind === "bootstrap_admin" && row.initial_role !== "admin")
+    (row.kind === "bootstrap_admin" && (row.initial_role !== "admin" || email === null))
   ) {
     return null;
   }
   return {
     inviteId: row.invite_id,
     verifier: row.secret_verifier,
-    email: row.email,
+    email,
     kind: row.kind,
     role: row.initial_role,
     status: row.status,
