@@ -6,7 +6,7 @@ import {
 } from "../../../../packages/core/src/auth/csrf.ts";
 import { principalKey, type HumanPrincipal, type HumanRole } from "../../../../packages/core/src/auth/principals.ts";
 import type { D1DatabaseLike } from "../db/d1.ts";
-import { createMemberInvite, revokeMemberInvite } from "../membership/invites.ts";
+import { createMemberInvite, createMemberLinkInvite, revokeMemberInvite } from "../membership/invites.ts";
 import { escapeHtml, htmlPage, redirectResponse, textResponse } from "../ui.ts";
 import { listHumanInvitesForAdmin, type HumanInviteAdminSummary } from "./invites.ts";
 import { listHumansForAdmin, setHumanRole, setHumanStatus, type HumanAdminSummary } from "./humans.ts";
@@ -90,7 +90,7 @@ function adminHomePage(principal: HumanPrincipal): Response {
     "Administration",
     `<h1>Administration</h1>
 <div class="box"><ul class="compact">
-<li><a href="/admin/invites">Invitations</a> — invite new human members and revoke pending invitations.</li>
+<li><a href="/admin/invites">Invitations</a> — create one-time DM links or email-bound invitations and revoke pending invitations.</li>
 <li><a href="/admin/users">Users</a> — site roles, account status, and owned-agent counts.</li>
 <li>Boards and board staff — next implementation slice.</li>
 <li>Agent incident control — owners provision credentials; site admins may disable/revoke for incident response.</li>
@@ -116,18 +116,31 @@ async function invitationsPage(
     "Invitations",
     `<h1>Invitations</h1>
 <p><a href="/admin">← Administration</a></p>
-<div class="box notice"><p>Normal invitations create ordinary <strong>member</strong> accounts only. Promote roles separately after the person has joined.</p></div>
-<h2>Create member invitation</h2>
+<div class="box notice"><p>All normal invitations create ordinary <strong>member</strong> accounts only. Promote roles separately after the person has joined.</p></div>
+<h2>Create DM link</h2>
 <div class="box">
+<p>Use this when you want to send somebody a one-time Aura link without knowing which email their Cloudflare identity uses.</p>
+<p class="meta">The link is the invitation capability: the first Cloudflare-authenticated identity to redeem it becomes the member. Send it privately to the intended recipient.</p>
 <form method="post" action="/admin/invites">
 <input type="hidden" name="csrf" value="${escapeHtml(createCsrf)}">
+<input type="hidden" name="mode" value="link">
+<p><label for="link-ttl">Expires after</label><select id="link-ttl" name="ttl_days">${inviteTtlOptions()}</select></p>
+<button type="submit">Create DM invite link</button>
+</form>
+</div>
+<h2>Create email-bound invitation</h2>
+<div class="box">
+<p>Use this when you want the invitation to be redeemable only by one verified Cloudflare email identity.</p>
+<form method="post" action="/admin/invites">
+<input type="hidden" name="csrf" value="${escapeHtml(createCsrf)}">
+<input type="hidden" name="mode" value="email">
 <p><label for="invite-email">Verified login email</label><input id="invite-email" type="email" name="email" maxlength="320" autocomplete="off" required></p>
-<p><label for="invite-ttl">Expires after</label><select id="invite-ttl" name="ttl_days"><option value="1">1 day</option><option value="3">3 days</option><option value="7" selected>7 days</option><option value="14">14 days</option><option value="30">30 days</option></select></p>
-<button type="submit">Create invitation</button>
+<p><label for="email-ttl">Expires after</label><select id="email-ttl" name="ttl_days">${inviteTtlOptions()}</select></p>
+<button type="submit">Create email-bound invitation</button>
 </form>
 </div>
 <h2>Invitation history</h2>
-${rows.length === 0 ? `<div class="box"><p>No invitations exist.</p></div>` : `<div class="table-wrap"><table><thead><tr><th>Email</th><th>Kind</th><th>State</th><th>Created</th><th>Expires</th><th>Action</th></tr></thead><tbody>${rows.join("")}</tbody></table></div>`}`,
+${rows.length === 0 ? `<div class="box"><p>No invitations exist.</p></div>` : `<div class="table-wrap"><table><thead><tr><th>Recipient</th><th>Binding</th><th>Kind</th><th>State</th><th>Created</th><th>Expires</th><th>Action</th></tr></thead><tbody>${rows.join("")}</tbody></table></div>`}`,
     { principal },
   );
 }
@@ -145,7 +158,8 @@ async function renderInviteRow(
   }
 
   return `<tr>
-<td>${escapeHtml(invite.email)}</td>
+<td>${invite.email === null ? "DM link" : escapeHtml(invite.email)}</td>
+<td>${escapeHtml(invite.binding)}</td>
 <td>${escapeHtml(invite.kind === "bootstrap_admin" ? "bootstrap admin" : "member")}</td>
 <td>${escapeHtml(invite.state)}</td>
 <td>${escapeHtml(formatTimestamp(invite.createdAt))}</td>
@@ -164,28 +178,35 @@ async function createInvitePost(
   const parsed = await readAdminForm(request, url, csrfKey, principal);
   if (!parsed.ok) return parsed.response;
   const ttl = INVITE_TTLS.get(parsed.form.get("ttl_days") ?? "");
-  if (ttl === undefined) return adminErrorPage("validation_error", principal, "/admin/invites");
+  const mode = parsed.form.get("mode");
+  if (ttl === undefined || (mode !== "link" && mode !== "email")) {
+    return adminErrorPage("validation_error", principal, "/admin/invites");
+  }
 
-  const result = await createMemberInvite(
-    db,
-    principal,
-    parsed.form.get("email"),
-    Math.floor(Date.now() / 1000),
-    ttl,
-  );
+  const now = Math.floor(Date.now() / 1000);
+  const result = mode === "link"
+    ? await createMemberLinkInvite(db, principal, now, ttl)
+    : await createMemberInvite(db, principal, parsed.form.get("email"), now, ttl);
   if (!result.ok) return adminErrorPage(result.error.code, principal, "/admin/invites");
 
   const invitationUrl = `${url.origin}/invite/${result.value.token}`;
+  const bindingDetails = result.value.binding === "link"
+    ? `<dt>Binding</dt><dd>DM link — first authenticated Cloudflare identity to redeem it</dd>`
+    : `<dt>Email</dt><dd>${escapeHtml(result.value.email)}</dd><dt>Binding</dt><dd>email</dd>`;
+  const deliveryNote = result.value.binding === "link"
+    ? "This is a one-time bearer invitation. DM it to the intended recipient; whoever first authenticates through Cloudflare Access and redeems it becomes the Aura member."
+    : "Send the URL only to the intended person. Aura requires Cloudflare Access to authenticate the same normalized email address before acceptance.";
+
   return htmlPage(
     "Invitation created",
     `<h1>Invitation created</h1>
 <div class="box notice"><p><strong>Copy this invitation URL now.</strong> Aura stores only a verifier and cannot recover the secret token.</p></div>
 <div class="box"><dl>
-<dt>Email</dt><dd>${escapeHtml(result.value.email)}</dd>
+${bindingDetails}
 <dt>Expires</dt><dd>${escapeHtml(formatTimestamp(result.value.expiresAt))}</dd>
 </dl>
 <code class="secret">${escapeHtml(invitationUrl)}</code>
-<p>Send the URL only to the intended person. Aura will require Cloudflare Access to authenticate the same normalized email address before acceptance.</p>
+<p>${escapeHtml(deliveryNote)}</p>
 <p><a href="/admin/invites">Return to invitations</a></p></div>`,
     { principal },
   );
@@ -264,6 +285,10 @@ function roleOptions(current: HumanRole): string {
   return (["member", "moderator", "admin"] as const)
     .map((role) => `<option value="${role}"${role === current ? " selected" : ""}>${role}</option>`)
     .join("");
+}
+
+function inviteTtlOptions(): string {
+  return `<option value="1">1 day</option><option value="3">3 days</option><option value="7" selected>7 days</option><option value="14">14 days</option><option value="30">30 days</option>`;
 }
 
 async function humanActionPost(
