@@ -404,11 +404,13 @@ async function boardsPage(
 <p><label for="board-slug">Slug</label><input id="board-slug" type="text" name="slug" maxlength="64" pattern="[a-z0-9]+(?:-[a-z0-9]+)*" placeholder="general" required></p>
 <p><label for="board-title">Title</label><input id="board-title" type="text" name="title" maxlength="120" required></p>
 <p><label for="board-description">Description</label><textarea id="board-description" name="description" maxlength="1024" rows="4"></textarea></p>
+<p><label for="board-max-threads">Maximum live threads</label><input id="board-max-threads" type="number" name="max_threads" min="1" max="10000" value="100" required></p>
+<p class="meta">When the live board exceeds this capacity, the least recently active threads fall into its read-only archive.</p>
 <button type="submit">Create board</button>
 </form>
 </div>
 <h2>Configured boards</h2>
-${rows.length === 0 ? `<div class="box"><p>No boards exist.</p></div>` : `<div class="table-wrap"><table><thead><tr><th>Board</th><th>Status</th><th>Order</th><th>Staff</th><th>Controls</th></tr></thead><tbody>${rows.join("")}</tbody></table></div>`}`,
+${rows.length === 0 ? `<div class="box"><p>No boards exist.</p></div>` : `<div class="table-wrap"><table><thead><tr><th>Board</th><th>Status</th><th>Capacity</th><th>Order</th><th>Staff</th><th>Controls</th></tr></thead><tbody>${rows.join("")}</tbody></table></div>`}`,
     { principal },
   );
 }
@@ -427,6 +429,7 @@ async function renderBoardRow(
   return `<tr>
 <td><strong>/${escapeHtml(board.slug)}/ — ${escapeHtml(board.title)}</strong><br><span class="meta"><code>${escapeHtml(board.boardId)}</code>${board.description ? ` · ${escapeHtml(board.description)}` : ""}</span></td>
 <td>${escapeHtml(board.status)}</td>
+<td>${board.maxThreads} live threads</td>
 <td>${board.sortOrder}</td>
 <td>${board.managerCount} manager / ${board.moderatorCount} moderator</td>
 <td>
@@ -460,6 +463,7 @@ async function createBoardPost(
       slug: parsed.form.get("slug"),
       title: parsed.form.get("title"),
       description: parsed.form.get("description") ?? "",
+      maxThreads: parsed.form.get("max_threads"),
     },
     Math.floor(Date.now() / 1000),
   );
@@ -486,21 +490,23 @@ async function boardManagementPage(
   return htmlPage(
     `/${board.slug}/ settings`,
     `<h1>/${escapeHtml(board.slug)}/ — ${escapeHtml(board.title)}</h1>
-<p>${back} · <a href="/admin/boards/${escapeHtml(board.boardId)}/staff">Board staff</a></p>
+<p>${back} · <a href="/b/${escapeHtml(board.slug)}">View board</a> · <a href="/b/${escapeHtml(board.slug)}/archive">View archive</a> · <a href="/admin/boards/${escapeHtml(board.boardId)}/staff">Board staff</a></p>
 <div class="box"><dl>
 <dt>Board ID</dt><dd><code>${escapeHtml(board.boardId)}</code></dd>
 <dt>Status</dt><dd>${escapeHtml(board.status)}</dd>
+<dt>Maximum live threads</dt><dd>${board.maxThreads}</dd>
 <dt>Sort order</dt><dd>${board.sortOrder}</dd>
 <dt>Your board role</dt><dd>${escapeHtml(board.actorBoardRole ?? (principal.role === "admin" ? "site admin" : "none"))}</dd>
 </dl></div>
-<h2>Board metadata</h2>
+<h2>Board settings</h2>
 <div class="box">
-<p class="meta">The slug is stable after creation. Board managers may edit title and description; lifecycle controls remain site-admin-only.</p>
+<p class="meta">The slug is stable after creation. Board managers may edit title, description, and live-thread capacity. Lowering capacity immediately moves excess bottom threads into the read-only archive.</p>
 <form method="post" action="${escapeHtml(metadataPath)}">
 <input type="hidden" name="csrf" value="${escapeHtml(metadataCsrf)}">
 <p><label for="board-title">Title</label><input id="board-title" type="text" name="title" maxlength="120" value="${escapeHtml(board.title)}" required></p>
 <p><label for="board-description">Description</label><textarea id="board-description" name="description" maxlength="1024" rows="6">${escapeHtml(board.description)}</textarea></p>
-<button type="submit">Save board metadata</button>
+<p><label for="board-max-threads">Maximum live threads</label><input id="board-max-threads" type="number" name="max_threads" min="1" max="10000" value="${board.maxThreads}" required></p>
+<button type="submit">Save board settings</button>
 </form>
 </div>
 ${lifecycle}`,
@@ -548,6 +554,7 @@ async function boardActionPost(
     ? await updateBoardMetadata(db, principal, boardId, {
         title: parsed.form.get("title"),
         description: parsed.form.get("description") ?? "",
+        maxThreads: parsed.form.get("max_threads"),
       }, now)
     : action === "status"
       ? await setBoardStatus(db, principal, boardId, parsed.form.get("status"), now)
