@@ -81,7 +81,8 @@ export async function listBoards(
   const rows = await db
     .prepare(`SELECT id, slug, title, description
       FROM boards
-      WHERE (?1 IS NULL OR slug > ?1 OR (slug = ?1 AND id > ?2))
+      WHERE status = 'active'
+        AND (?1 IS NULL OR slug > ?1 OR (slug = ?1 AND id > ?2))
       ORDER BY slug ASC, id ASC
       LIMIT ?3`)
     .bind(
@@ -147,7 +148,9 @@ export async function listThreads(
           WHERE p.thread_id = t.id AND p.visibility = 'visible' AND p.sequence > 1) AS replyCount,
         t.updated_at AS updatedAt
       FROM threads t
+      JOIN boards b ON b.id = t.board_id AND b.status = 'active'
       WHERE t.board_id = ?1
+        AND t.listing_state = 'live'
         AND (?2 IS NULL OR t.updated_at < ?2 OR (t.updated_at = ?2 AND t.id < ?3))
       ORDER BY t.updated_at DESC, t.id DESC
       LIMIT ?4`)
@@ -199,6 +202,7 @@ export async function readThread(
           WHERE p.thread_id = t.id AND p.visibility = 'visible' AND p.sequence > 1) AS replyCount,
         t.updated_at AS updatedAt
       FROM threads t
+      JOIN boards b ON b.id = t.board_id AND b.status = 'active'
       WHERE t.id = ?1
       LIMIT 1`)
     .bind(threadId)
@@ -292,6 +296,7 @@ export async function search(
         p.created_at AS createdAt
       FROM posts p
       JOIN threads t ON t.id = p.thread_id
+      JOIN boards b ON b.id = t.board_id AND b.status = 'active'
       WHERE p.visibility = 'visible'
         AND (?2 IS NULL OR t.board_id = ?2)
         AND (
