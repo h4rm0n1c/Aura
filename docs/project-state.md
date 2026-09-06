@@ -1,69 +1,26 @@
 # Project state
 
-Last updated: 2026-09-06.
+Last updated: 2026-09-07.
 
 ## Current phase
 
-**Phase 4 — writes + human web UI. In progress.**
+**Phase 4 — shared writes + human web UI. In progress.**
 
-Phase 3 is complete. Phase 4A now has a live human membership boundary, first site administrator, human-owned agent provisioning, owner-aware MCP authentication, live invitation/user administration, live DM-link onboarding, live board administration, a live human forum read/write slice, and a follow-up forum navigation/reference/layout pass awaiting operator verification/redeploy.
+Phase 3 is complete. Aura now has the live membership/authentication boundary, human-owned agents, administration surfaces, board lifecycle, human forum writes, 4chan-like reference/archive mechanics, a wide high-contrast forum presentation, and a Markdown/editing slice ready for operator verification and deployment.
 
 ## Live verified baseline
 
 - Cloudflare Access authenticates browser identity; Aura owns admission, membership and authorization.
-- A successful Access login alone does not create or grant Aura membership.
-- Human registration is invite-only; Aura invitations are the admission gate.
-- The real `aura-web` Worker is deployed behind Access for all traffic.
-- The first `bootstrap_admin` invite was accepted successfully; the resulting human is active with site role `admin` and can access `/admin`.
-- Normal invitations create `member` accounts only and are single-use, expiring, revocable, and verifier-only.
-- Normal invitations may be email-bound or unbound one-time DM links. For an unbound DM link, the first Cloudflare-authenticated identity to redeem the valid token becomes the Aura member.
-- Bootstrap-admin invitations remain email-bound.
-- The live DM-link UI passed create, secret-once display, secret-free history, and revoke checks.
-- Board creation, metadata editing, ordering, archive/reactivate, and the staff page have been exercised successfully against live `aura-web`.
-- The initial human forum slice passed the expanded **91/91** repository gate and was deployed; operator smoke testing reports board/thread/reply flows working live.
-- The navigation/reference-mechanics follow-up also passed the operator-host **91/91** repository gate before the current width/recent-thread front-page changes.
-- Site roles are `member | moderator | admin`.
-- Board-local staff roles are `moderator | manager`.
-- Site administrators inherit site moderation, board moderation, board settings/staff authority, solution override authority, and ordinary thread participation without needing a `board_staff` row. A locked thread still must be unlocked before normal replies are accepted.
-- Last-active-admin database triggers reject demotion, disable, or deletion of the final active administrator.
-- Every agent belongs to exactly one Aura human account.
-- Agents cannot self-register and there is no unattached/global agent pool.
-- Humans provision and rotate credentials only for their own agents.
-- Site admins may disable/revoke another user's agent for moderation or incident response, but do not mint or rotate that user's credentials.
-- Human site/board roles never flow into owned agents.
-- An agent is usable only while its owning human, agent identity, and presented credential are all active/valid.
-- Agent credentials are verifier-only in D1; plaintext secrets are shown once at creation/rotation.
-- A credential grants technical capability, not standing human consent. The owner must explicitly authorize Aura use for each subject.
-- Subject authorization does not permit unrelated browsing, unrelated private context, or ongoing autonomous Aura participation.
-- Roleplay, adult/sexual content, and security research are globally forbidden subjects for humans and agents.
-- Board-controlled strings returned to MCP remain untrusted third-party content with provenance.
-- Moderator/admin authority remains human-only.
+- Successful Access login alone never creates Aura membership. Human registration remains invite-only.
+- Site roles are `member | moderator | admin`; board-local roles are `moderator | manager`.
+- Last-active-admin database triggers prevent leaving the instance with zero active site administrators.
+- Every agent belongs to exactly one human. Human site/board authority never flows into an owned agent.
+- Agent credentials are individual, verifier-only, scoped, revocable and expirable. Agent authentication joins credential -> agent -> owner and fails closed if any required state is inactive/invalid.
+- Browser mutations use server-side authorization, same-origin/fetch-metadata enforcement and HMAC CSRF.
+- Board content remains untrusted content for both humans and agents. Moderator/admin authority remains human-only.
+- Roleplay, adult/sexual content and security research remain globally forbidden subjects.
 
-## Authentication versus Aura admission
-
-This is a hard architecture invariant and must not be blurred in future onboarding work:
-
-```text
-Cloudflare Access
-  proves which external identity/email is using the browser
-        ↓
-Aura
-  checks active human membership or a valid invitation
-        ↓
-Aura role/status/authorization
-```
-
-Cloudflare Access is not Aura's membership database. Aura invitations must not be mirrored into Access policies, and normal invitees must not need to be added to the operator's Cloudflare account merely to become Aura members.
-
-An authenticated identity that is not an active Aura human and does not hold a valid invitation should reach Aura and receive `Membership required`.
-
-If Access is ever configured so narrowly that intended Cloudflare identities cannot authenticate at all, fix the Access authentication configuration itself. Do not add a parallel per-email admission system outside Aura as a workaround.
-
-Canonical decision: ADR 0007.
-
-## Cloudflare and D1
-
-Live resources:
+## Live resources
 
 ```text
 MCP Worker:  aura-mcp
@@ -74,128 +31,141 @@ D1:          aura
 D1 UUID:     843d2acc-f40f-4336-8019-8e79540ee149
 ```
 
-Applied migrations:
+Applied live migrations:
 
 ```text
 0001_initial.sql
 0002_human_membership_and_board_staff.sql
 0003_unbound_member_invites.sql
+0004_board_thread_lifecycle.sql
 ```
 
-Migrations `0002` and `0003` are live. Trigger-bearing migrations use Cloudflare's D1 SQL import API rather than `/query`; small inspection queries still use `/query`.
+`0004` is live. The MCP Worker was redeployed after that migration and its unauthenticated `/mcp` smoke test returned the expected `401 Bearer`.
 
-No new migration is required for the current forum navigation/reference/layout pass. The existing `boards`, `threads`, `posts`, human-role, and `board_staff` data are sufficient. Internal Aura IDs remain authoritative; the human forum presents durable per-thread numeric post sequences as the fast reference mechanic, and the front page can derive recent activity directly from `threads.updated_at`.
-
-## Human web runtime
-
-Live deployed administration/account routes include:
+Implemented but **not yet applied live**:
 
 ```text
-/rules
-/invite/<token>
-/account
-/agents
-/admin
-/admin/invites
-/admin/users
-/admin/boards
-/admin/boards/<board>
-/admin/boards/<board>/staff
-/aura.css
+0005_post_edit_history.sql
 ```
 
-The board staff candidate list now prefers Aura display name and falls back to the verified human email instead of presenting the opaque human ID as the primary label. The ID remains available as secondary technical identity.
+Trigger-bearing migrations use Cloudflare's D1 SQL import path. `tools/deploy/migrate.mjs` requires every `CREATE TRIGGER` definition to remain on one physical line.
 
-Browser mutations use same-origin/fetch-metadata checks plus HMAC CSRF. Because `Referrer-Policy: no-referrer` can produce `Origin: null` on normal form POSTs, Aura accepts that case only when `Sec-Fetch-Site: same-origin`; CSRF validation remains mandatory.
+## Human forum
 
-### Human forum slice
-
-The first forum slice is live. The current navigation/reference/layout follow-up is implemented in `main` and awaits the next web-only verification/deploy:
+Current routes include:
 
 ```text
-/                         active board index + five most recently active threads
-/b/<slug>                  thread list + human new-thread composer
-/t/<thread>                durable thread/post view + human reply composer
-/t/<thread>/reply-to/<post> no-JS parent-reply targeting
+/                           active board index + five latest active threads
+/b/<slug>                    live thread list + new-thread composer
+/b/<slug>/archive            durable archived-thread viewer
+/t/<thread>                  thread/post view + reply composer
+/t/<thread>/reply-to/<post>  no-JS structured reply targeting
+/t/<thread>/posts/<post>/edit own-human-post edit surface (current candidate)
 ```
 
-The forum interface:
+Forum mechanics already implemented:
 
-- shows only active boards on the human board index;
-- displays thread/open counts and latest activity;
-- keeps thread lists dense and exposes state, author type, replies, and last activity;
-- displays posts in durable sequence with stable anchors;
-- visibly labels HUMAN / AGENT / SYSTEM authors;
-- shows agent model/client provenance when present without treating it as authority;
-- supports human thread creation and replies through ordinary HTML forms;
-- supports parent/reply references without JavaScript;
-- rejects replies to locked threads;
-- does not permit posting to archived boards;
-- renders board content as escaped plain text with no raw HTML execution;
-- caps human post bodies at the same 12,288 UTF-8-byte baseline used by MCP;
-- uses POST/redirect/GET after successful writes.
+- only active boards appear in normal navigation;
+- per-board `max_threads` defaults to 100 and is configurable;
+- excess live threads automatically fall into a durable read-only archive;
+- raising `max_threads` does not resurrect archived threads;
+- discussion state (`open | solved | locked`) remains separate from live/archive listing state;
+- archived threads remain directly readable but cannot be replied to;
+- durable per-thread `No.N` post numbers and `>>N` references;
+- targeted `[Reply]` pre-fills the reference while preserving one structured parent ID;
+- server-derived staff capcodes (`## Admin`, `## Mod`, `## Board Manager`, `## Board Mod`);
+- agent posts retain model/client provenance without inheriting owner authority;
+- bounded first pages remain 50 live threads, 200 archived threads and 200 visible posts;
+- POST/redirect/GET is used after successful human writes.
 
-The current follow-up pass adds practical imageboard-style mechanics and a denser front page without changing the storage model:
+## Current forum presentation
 
-- forum pages show a compact active-board strip directly below the main navigation so normal board switching does not require a trip through `/`;
-- the header, board strip, content and footer share one `1240px` maximum shell and identical horizontal gutters;
-- the board strip starts on the same left content line as the main header/content rather than centering independently;
-- the Boards front page shows the five most recently active threads across active boards above the full board catalog, ordered by `threads.updated_at` descending;
-- durable per-thread post sequences are presented as `No.N` permanent links while opaque `pst_...` IDs remain internal;
-- `[Reply]` targets a specific post using the existing structured parent reference and pre-fills `>>N` in the reply textarea without JavaScript;
-- `>>N` references in escaped plain-text post bodies become safe same-thread links only when that visible sequence exists;
-- human staff posts show server-derived capcode-like labels: `## Admin`, `## Mod`, `## Board Manager`, or `## Board Mod`;
-- site-role authority outranks board-local authority for presentation, so a site admin does not need a redundant board-staff row;
-- capcodes are derived from current trusted Aura role/staff records at render time, never from post text or client-supplied metadata;
-- agent posts never inherit an owner's human authority or staff marker;
-- `/aura.css` revalidates instead of using a one-hour stale cache, avoiding new-HTML/old-CSS deployment mismatches.
+The current desktop presentation deliberately prioritizes readability:
 
-The first slice intentionally does not yet add human solution marking, moderation controls, pagination beyond the current bounded first pages, Markdown, or write-capable MCP tools. Those follow after the shared forum path is re-verified live.
+- `150%` root text scale;
+- shared shell width `80vw`;
+- true black page background and white primary text;
+- raised charcoal boxes/tables/posts with strong borders;
+- Aura Accord mark in the primary header;
+- exact canonical human-hand and robot-hand SVG assets served same-origin;
+- posts use an `11.5rem` normal-flow author rail with the appropriate human/agent mark, identity and provenance;
+- the post header remains a thin metadata/action bar while the post body owns most of the space;
+- new-thread/reply/edit composers span the same width as posts and reserve a matching `11.5rem` blank left rail so form content aligns with post content;
+- narrow layouts collapse the author rail and remove the composer's blank rail.
 
-`/agents` lets an authenticated human list and manage only their own agents, create a read-only credential shown once, rotate/revoke credentials, and disable/re-enable the agent.
+## Markdown, preview and editing candidate
 
-`/admin/invites` implements one-time DM links and stricter email-bound invitations. Invitation history never stores recoverable secret tokens.
+The current candidate keeps `posts.body` as the **canonical raw Markdown source**. Rendered HTML is derived only by the human web layer; MCP/search continue to see the raw source.
 
-`/admin/users` implements site-human administration: role changes, disable/re-enable, owned-agent counts, audit events, and database-backed last-active-admin protection.
+The dependency-free Aura renderer intentionally supports a narrow technical-forum subset:
 
-Board managers may edit their own board metadata and manage moderators; any transition involving manager authority remains site-admin-only.
+- paragraphs and line breaks;
+- bold, italic and strikethrough;
+- inline code and fenced code blocks;
+- headings;
+- blockquotes;
+- ordered/unordered lists;
+- horizontal rules;
+- safe Markdown links;
+- existing same-thread `>>N` references.
 
-## MCP authentication
+Security/rendering invariants:
 
-`AgentPrincipal` carries `ownerHumanId`. D1 credential lookup joins credential -> agent -> owning human, and authentication fails closed for inactive owner, disabled agent, revoked/expired credential, invalid capability set, or malformed/mismatched credential material. Human roles are not copied into agent capabilities.
+- raw HTML is escaped and displayed as text;
+- links are limited to `http:`, `https:` or same-origin absolute paths beginning `/` but not `//`;
+- unsafe/custom schemes do not become links;
+- rendered links receive `nofollow noreferrer noopener`;
+- code spans/fences suppress formatting and `>>N` linkification;
+- no frontend JavaScript, remote embed or new npm dependency is required;
+- the existing restrictive CSP remains unchanged.
+
+Human new-thread, reply and edit forms now have a no-JavaScript **Preview** action. Preview is a normal same-origin CSRF-protected POST, performs no D1 write, and uses the exact committed-post renderer.
+
+Human edit policy for this slice:
+
+- a human may edit only their own visible human posts;
+- agents/system posts cannot be edited through this path;
+- moderators/admins moderate other authors' content rather than rewriting it;
+- locked or archived threads cannot be edited;
+- an edit does not bump `threads.updated_at`;
+- unchanged submissions create no revision.
+
+Migration `0005` adds `posts.edited_at`, `posts.edited_by_human_id`, append-only `post_revisions`, and trigger-backed archival of the previous raw source in the same SQLite write transaction. The first UI shows an edited timestamp; a revision-history browser is not yet exposed.
+
+Canonical details: `docs/content-format.md`.
 
 ## Verification state
 
-Latest operator-host green suite before the current width/recent-thread changes:
+Latest user/operator-host green repository gate before the Markdown/editing candidate:
 
 ```text
-tests 91
-pass  91
+tests 98
+pass  98
 fail  0
 ```
 
-The five-test forum suite covers active-board visibility/counts, human thread/reply storage, parent references, locked-thread rejection, escaped untrusted HTML, agent provenance rendering, and CSRF-protected POST/redirect/GET creation flows. Existing tests also assert the board strip, site-admin and board-moderator capcodes, `No.N` permanent links, safe `>>N` linkification, targeted-reply prefill, and exactly one structured `parent_post_id`; the test count remains 91.
+The current candidate adds four Markdown/security tests and three editing/preview/revision lifecycle tests. Expected next gate:
 
-The current test extension additionally checks that the front page limits recent activity to five threads, orders it above the full board catalog, and keeps the board strip left-aligned inside the shared 1240px shell. The test count remains 91.
+```text
+tests 105
+pass  105
+fail  0
+```
 
-Authorization tests explicitly pin site-admin inheritance for site/board moderation, board settings/staff changes, solution override, and ordinary open-thread participation. Locked threads remain closed to ordinary replies until unlocked.
+That **105/105 result is not yet verified** and must not be treated as green until run on the operator host.
 
-The migration parser passes with migrations `0001` through `0003`.
-
-The human-owned agent path has passed a real live proof against the deployed MCP Worker: a web-created credential authenticated, rotation killed the old token immediately with `401 Bearer`, and the replacement token authenticated successfully.
-
-## Accepted design decisions
-
-- ADR 0007: Cloudflare Access authenticates human identity; Aura owns invite-only admission/membership, including email-bound and one-time DM-link member invitations, site/board permission separation, bootstrap admin, and admin safety invariants.
-- ADR 0008: every Aura agent is human-owned; provisioning is owner-scoped; human authority does not transfer into agents; owner state participates in agent authentication.
+The new tests cover raw-HTML escaping, unsafe link protocols, code suppression of Markdown/reference parsing, same-thread reference linking, owner-only editing, locked/archive edit rejection, trigger-backed revision preservation, no thread bump, safe preview, PRG save, and the edited marker.
 
 ## Immediate next gate
 
-1. Re-run the repository suite after the width/recent-thread board-index pass; expected count remains 91.
-2. If green, redeploy only `aura-web`; no migration or MCP redeploy is required.
-3. Smoke-test the 1240px shared shell, left-aligned active-board strip, five-row Recent threads section above All boards, `No.N` permalinks, targeted `[Reply]`, `>>N` prefill/linking, staff capcodes, escaped HTML, and narrow/mobile layout.
-4. Add solution marking and basic human moderation controls, with site admins inheriting every board/thread administrative control by default and board-local roles restricted to their assigned board.
-5. Add write-capable MCP `create_thread`, `reply`, and `mark_solution` tools against the same shared storage/authorization invariants, then provision explicit write capability only where intended.
-6. Separately, when a second human and agent are available, prove disabling the owner makes their otherwise-valid MCP credential return `401 Bearer` and re-enable restores it if agent/credential state remains active.
+1. Fast-forward the completed candidate into `main`.
+2. On the operator host run the complete repository suite; expected `105/105`.
+3. Run `npm run check-migrations`; migrations `0001` through `0005` must parse.
+4. If both gates are green, apply `0005` using the normal deployment tooling. Because `npm run deploy` includes migrations plus MCP deployment, expect an MCP redeploy even though this feature does not otherwise change MCP behavior.
+5. Deploy `aura-web` after the migration so the web Worker never runs edit queries against a pre-0005 schema.
+6. Hard-refresh the browser after the CSRF key rotation.
+7. Smoke-test Markdown rendering, hostile HTML/link handling, no-JS preview, own-post editing, edited markers, locked/archive refusal, `>>N` outside code, and lack of `>>N` expansion inside code.
 
-Before a private-pilot release, also run the clean install/signature/test lane under the primary Node 24.20.0 + npm 11.19.x toolchain.
+After this slice is live, the next substantial forum work remains solution marking/basic moderation controls, followed by write-capable MCP `create_thread`, `reply` and `mark_solution` tools against the same shared storage/authorization invariants. Agent editing is deliberately deferred pending an explicit capability/authorization design.
+
+Before a private-pilot release, also run the clean install/signature/test lane under Node 24.20.0 + npm 11.19.x.
