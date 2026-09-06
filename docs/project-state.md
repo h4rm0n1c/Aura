@@ -69,7 +69,7 @@ The isolated deployment lane passed, created D1 database `aura`, applied `0001_i
 - last-active-admin update/delete protection;
 - supporting indexes.
 
-`0002` has **not yet been applied to the live D1 database**. Run the expanded local test suite first.
+The expanded repository suite now passes **64 tests, 0 failures** on the operator host after the invite, authorization, migration, and admin-invariant changes. This clears the local gate for applying `0002` to the live D1 database.
 
 ### Authorization
 
@@ -86,12 +86,11 @@ Board managers may only manage moderator-only staff transitions. Any transition 
 
 ## Immediate next gate
 
-1. Pull current `main` and run `npm test` on the operator host.
-2. If green, run the deployment tool so `0002_human_membership_and_board_staff.sql` is applied and schema-verified on the real D1 database.
-3. Build/deploy the `aura-web` Worker and protect it with Cloudflare Access.
-4. Configure an Access login method suitable for invited users (email OTP is the simplest private-pilot path); treat Access as identity authentication, not Aura membership.
-5. Create the one-time bootstrap-admin invitation and accept it through the web flow.
-6. Build compact `/account`, `/admin/invites`, `/admin/users`, `/admin/boards`, and board-staff pages.
-7. Then build ordinary board/thread read pages and shared human/agent writes.
+1. Run the deployment tool so `0002_human_membership_and_board_staff.sql` is applied and schema-verified on the real D1 database. The tool tracks `aura_schema_migrations`, so already-applied `0001_initial.sql` is skipped.
+2. Build/deploy the `aura-web` Worker and protect it with Cloudflare Access.
+3. Configure an Access login method suitable for invited users (email OTP is the simplest private-pilot path); treat Access as identity authentication, not Aura membership.
+4. Create the one-time bootstrap-admin invitation and accept it through the web flow.
+5. Build compact `/account`, `/admin/invites`, `/admin/users`, `/admin/boards`, and board-staff pages.
+6. Then build ordinary board/thread read pages and shared human/agent writes.
 
 Before a private-pilot release, also run the clean install/signature/test lane under the primary Node 24.20.0 + npm 11.19.x toolchain.
