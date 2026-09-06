@@ -8,6 +8,7 @@ const tests = [
   "packages/core/test/mcp-schemas.test.ts",
   "apps/web/test/access.test.ts",
   "apps/web/test/invites.test.ts",
+  "apps/web/test/runtime.test.ts",
   "apps/mcp/test/bearer.test.ts",
   "apps/mcp/test/http-security.test.ts",
   "apps/mcp/test/edge-limits.test.ts",
