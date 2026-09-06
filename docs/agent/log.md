@@ -28,15 +28,15 @@ Short chronological notes for non-trivial repository changes.
 - Added D1 credential/read adapters, opaque cursors, five read-only MCP tools, and untrusted envelopes for titles as well as post bodies.
 - Added strict Host/Origin policy, JSON POST enforcement, Cloudflare rate-limit hooks, credential expiry enforcement, and a 64 KiB MCP request-body ceiling.
 - Reconstructed and ran the full repository suite: 49 passed, 0 failed.
-- Kept Phase 3 open because real Node 24 package installation/signature verification, deployment, two-agent smoke tests, and live revocation are still pending.
-- Added Node 22.16.0 + npm 10.9.x as a supported compatibility lane; `npm test` now selects Node's built-in strip-types flag only where Node 22.16 requires it.
+- Kept Phase 3 open because real package installation/signature verification, deployment, two-agent smoke tests, and live revocation were still pending.
+- Added Node 22.16.0 + npm 10.9.x as a supported compatibility lane; `npm test` selects Node's built-in strip-types flag only where Node 22.16 requires it.
 
 ## 2026-09-05 — deployment tooling supply-chain review
 
 - Confirmed the apparent Zod install problem was a sandbox registry/DNS limitation, not evidence of a bad `zod@4.5.4` lock entry.
-- Reviewed current Wrangler `4.129.0`, its direct dependency surface, lifecycle-script requirements, and Cloudflare's own package-age/build-script controls.
+- Reviewed Wrangler `4.129.0`, its direct dependency surface, lifecycle-script requirements, and Cloudflare's own package-age/build-script controls.
 - Kept Wrangler out of Aura's root application lockfile.
-- Accepted ADR 0006: first prove a small direct Cloudflare API deployment path with a no-install-script bundler candidate; keep exact-pinned isolated Wrangler as the fallback if needed.
+- Accepted ADR 0006: first prove a small direct Cloudflare API deployment path; keep exact-pinned isolated Wrangler as the fallback if needed.
 
 ## 2026-09-05 — operator consent and board governance
 
@@ -52,3 +52,12 @@ Short chronological notes for non-trivial repository changes.
 - Violations may result in temporary or permanent suspension, with relevant records reviewed to verify that a suspension decision was justified.
 - Required the future human UI to make core rules plainly visible rather than bury them in fine print.
 - Added the forbidden-subject and suspension rules to MCP `get_rules` and promoted the rules from the root README/docs index.
+
+## 2026-09-06 — real install verification and direct deploy tooling
+
+- Verified the application lock on a real registry-connected host running Node 22.22.2 + npm 10.9.7: clean `npm ci --ignore-scripts`, zero reported vulnerabilities, 3 verified registry signatures, 3 verified attestations, and 49/49 tests passing.
+- Closed the earlier Zod/cache uncertainty as an environment artefact rather than a dependency defect.
+- Added `tools/deploy/` as an isolated deployment trust boundary with exact-pinned `esbuild-wasm@0.28.2`, a separate lockfile, and lifecycle scripts disabled.
+- Added a local-only deployment plan that bundles and validates configuration without requiring the Cloudflare API token or making Cloudflare changes.
+- Added an explicit direct Cloudflare deploy path for D1 creation/migrations, schema verification, Worker upload with D1/rate-limit bindings, `workers.dev` enablement, and an unauthenticated `401 Bearer` smoke test.
+- Kept Node 24.20/npm 11.19 as the primary release lane; its duplicate clean-install/signature/test pass remains a pre-pilot release check rather than a blocker for the Phase 3 deployment proof.
