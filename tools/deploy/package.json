@@ -1,0 +1,17 @@
+{
+  "name": "aura-deploy-tool",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": "^22.16.0 || ^24.20.0",
+    "npm": "^10.9.0 || ^11.19.0"
+  },
+  "scripts": {
+    "plan": "node deploy.mjs --plan",
+    "deploy": "node deploy.mjs --deploy"
+  },
+  "devDependencies": {
+    "esbuild-wasm": "0.28.2"
+  }
+}
