@@ -1,6 +1,20 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { authorizeBoardPost, authorizeBoardRead, authorizeManageAgent, authorizeMarkSolution, authorizeModeration, authorizeThreadReply } from "../src/domain/authorization.ts";
+import {
+  authorizeBoardLifecycle,
+  authorizeBoardModeration,
+  authorizeBoardPost,
+  authorizeBoardRead,
+  authorizeBoardSettings,
+  authorizeBoardStaffChange,
+  authorizeHumanAdministration,
+  authorizeInviteAdministration,
+  authorizeManageAgent,
+  authorizeMarkSolution,
+  authorizeModeration,
+  authorizeThreadReply,
+  isBoardStaffRole,
+} from "../src/domain/authorization.ts";
 import type { AgentPrincipal, HumanPrincipal } from "../src/auth/principals.ts";
 
 const member: HumanPrincipal = { kind: "human", humanId: "human-1", role: "member", email: "member@example.test", displayName: null };
@@ -22,7 +36,7 @@ test("locked threads reject normal replies regardless of participant type", () =
   assert.deepEqual(authorizeThreadReply(poster, "locked"), { ok: false, error: { code: "thread_locked" } });
 });
 
-test("moderation is human-only and agent management is owner-or-admin", () => {
+test("site-wide moderation is human-only and agent management is owner-or-admin", () => {
   assert.equal(authorizeModeration(member).ok, false);
   assert.deepEqual(authorizeModeration(moderator), { ok: true });
   assert.equal(authorizeModeration(poster).ok, false);
@@ -31,9 +45,47 @@ test("moderation is human-only and agent management is owner-or-admin", () => {
   assert.deepEqual(authorizeManageAgent(admin, "human-1"), { ok: true });
 });
 
-test("solution authority is thread-author scoped with human moderator override", () => {
+test("board-local moderation does not grant site authority", () => {
+  assert.deepEqual(authorizeBoardModeration(member, "moderator"), { ok: true });
+  assert.deepEqual(authorizeBoardModeration(member, "manager"), { ok: true });
+  assert.equal(authorizeBoardModeration(member, null).ok, false);
+  assert.deepEqual(authorizeBoardModeration(moderator, null), { ok: true });
+  assert.equal(authorizeBoardModeration(poster, "manager").ok, false);
+
+  assert.equal(authorizeInviteAdministration(member).ok, false);
+  assert.equal(authorizeInviteAdministration(moderator).ok, false);
+  assert.equal(authorizeHumanAdministration(member).ok, false);
+  assert.equal(authorizeHumanAdministration(moderator).ok, false);
+  assert.deepEqual(authorizeInviteAdministration(admin), { ok: true });
+  assert.deepEqual(authorizeHumanAdministration(admin), { ok: true });
+});
+
+test("board managers can edit their board but lifecycle remains site-admin only", () => {
+  assert.deepEqual(authorizeBoardSettings(member, "manager"), { ok: true });
+  assert.equal(authorizeBoardSettings(member, "moderator").ok, false);
+  assert.equal(authorizeBoardSettings(moderator, null).ok, false);
+  assert.deepEqual(authorizeBoardSettings(admin, null), { ok: true });
+
+  assert.equal(authorizeBoardLifecycle(member).ok, false);
+  assert.equal(authorizeBoardLifecycle(moderator).ok, false);
+  assert.deepEqual(authorizeBoardLifecycle(admin), { ok: true });
+});
+
+test("board managers may manage moderators but may not grant manager authority", () => {
+  assert.deepEqual(authorizeBoardStaffChange(member, "manager", "moderator"), { ok: true });
+  assert.equal(authorizeBoardStaffChange(member, "manager", "manager").ok, false);
+  assert.equal(authorizeBoardStaffChange(member, "moderator", "moderator").ok, false);
+  assert.deepEqual(authorizeBoardStaffChange(admin, null, "moderator"), { ok: true });
+  assert.deepEqual(authorizeBoardStaffChange(admin, null, "manager"), { ok: true });
+  assert.equal(authorizeBoardStaffChange(poster, "manager", "moderator").ok, false);
+  assert.equal(isBoardStaffRole("manager"), true);
+  assert.equal(isBoardStaffRole("owner"), false);
+});
+
+test("solution authority is thread-author scoped with site or board moderator override", () => {
   assert.deepEqual(authorizeMarkSolution(member, { kind: "human", humanId: "human-1" }), { ok: true });
   assert.equal(authorizeMarkSolution(member, { kind: "human", humanId: "someone-else" }).ok, false);
+  assert.deepEqual(authorizeMarkSolution(member, { kind: "agent", agentId: "agent-2" }, "moderator"), { ok: true });
   assert.deepEqual(authorizeMarkSolution(moderator, { kind: "agent", agentId: "agent-2" }), { ok: true });
   assert.deepEqual(authorizeMarkSolution(poster, { kind: "agent", agentId: "agent-2" }), { ok: true });
   assert.equal(authorizeMarkSolution(poster, { kind: "agent", agentId: "other-agent" }).ok, false);
