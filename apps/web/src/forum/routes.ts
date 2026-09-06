@@ -21,6 +21,7 @@ import {
   createHumanReply,
   createHumanThread,
   getForumBoard,
+  getForumBoardArchive,
   getForumThread,
   listForumBoards,
   type ForumAuthor,
@@ -35,13 +36,16 @@ const THREAD_ID = "thr_[A-Za-z0-9_-]{22}";
 const POST_ID = "pst_[A-Za-z0-9_-]{22}";
 const BOARD_SLUG_VALUE = new RegExp(`^${BOARD_SLUG}$`);
 const THREAD_ID_VALUE = new RegExp(`^${THREAD_ID}$`);
+const POST_ID_VALUE = new RegExp(`^${POST_ID}$`);
 const BOARD_PATH = new RegExp(`^/b/(${BOARD_SLUG})$`);
+const BOARD_ARCHIVE_PATH = new RegExp(`^/b/(${BOARD_SLUG})/archive$`);
 const BOARD_CREATE_THREAD_PATH = new RegExp(`^/b/(${BOARD_SLUG})/threads$`);
 const THREAD_PATH = new RegExp(`^/t/(${THREAD_ID})$`);
 const THREAD_REPLY_PATH = new RegExp(`^/t/(${THREAD_ID})/reply$`);
 const THREAD_REPLY_TO_PATH = new RegExp(`^/t/(${THREAD_ID})/reply-to/(${POST_ID})$`);
 const MAX_FORM_BYTES = 48 * 1024;
 const RECENT_THREAD_LIMIT = 5;
+const RECENT_EXCERPT_CHARS = 220;
 
 type ForumHumanAuthority = "site-admin" | "site-moderator" | "board-manager" | "board-moderator";
 
@@ -57,6 +61,9 @@ interface RecentThreadRow {
   readonly state: unknown;
   readonly board_slug: unknown;
   readonly reply_count: unknown;
+  readonly excerpt_post_id: unknown;
+  readonly excerpt_sequence: unknown;
+  readonly excerpt_body: unknown;
   readonly updated_at: unknown;
 }
 
@@ -66,6 +73,9 @@ interface RecentThreadSummary {
   readonly state: "open" | "solved" | "locked";
   readonly boardSlug: string;
   readonly replyCount: number;
+  readonly excerptPostId: string;
+  readonly excerptSequence: number;
+  readonly excerptBody: string;
   readonly updatedAt: number;
 }
 
@@ -78,6 +88,9 @@ export async function handleForumRequest(
 ): Promise<Response | null> {
   if (request.method === "GET") {
     if (url.pathname === "/") return boardIndexPage(db, principal);
+
+    const archiveMatch = url.pathname.match(BOARD_ARCHIVE_PATH);
+    if (archiveMatch !== null) return boardArchivePage(db, principal, archiveMatch[1]);
 
     const boardMatch = url.pathname.match(BOARD_PATH);
     if (boardMatch !== null) return boardPage(db, csrfKey, principal, boardMatch[1]);
@@ -108,6 +121,7 @@ export async function handleForumRequest(
   if (
     url.pathname === "/" ||
     BOARD_PATH.test(url.pathname) ||
+    BOARD_ARCHIVE_PATH.test(url.pathname) ||
     BOARD_CREATE_THREAD_PATH.test(url.pathname) ||
     THREAD_PATH.test(url.pathname) ||
     THREAD_REPLY_PATH.test(url.pathname) ||
@@ -135,7 +149,7 @@ async function boardIndexPage(db: D1DatabaseLike, principal: HumanPrincipal): Pr
     : "";
   const recentHtml = recent.length === 0
     ? `<div class="box"><p>No active threads yet.</p></div>`
-    : `<div class="table-wrap"><table class="recent-thread-list"><thead><tr><th>Board</th><th>Thread</th><th>Replies</th><th>Last activity</th></tr></thead><tbody>${recentRows}</tbody></table></div>`;
+    : `<div class="table-wrap"><table class="recent-thread-list"><thead><tr><th>Board</th><th>Thread / latest post</th><th>Replies</th><th>Last activity</th></tr></thead><tbody>${recentRows}</tbody></table></div>`;
 
   return htmlPage(
     "Boards",
@@ -143,15 +157,16 @@ async function boardIndexPage(db: D1DatabaseLike, principal: HumanPrincipal): Pr
 <h2>Recent threads</h2>
 ${recentHtml}
 <h2>All boards</h2>
-${result.value.length === 0 ? empty : `<div class="table-wrap"><table class="board-index"><thead><tr><th>Board</th><th>Threads</th><th>Open</th><th>Last activity</th></tr></thead><tbody>${rows}</tbody></table></div>`}`,
+${result.value.length === 0 ? empty : `<div class="table-wrap"><table class="board-index"><thead><tr><th>Board</th><th>Live</th><th>Open</th><th>Archive</th><th>Last activity</th></tr></thead><tbody>${rows}</tbody></table></div>`}`,
     { principal, boards: result.value },
   );
 }
 
 function renderRecentThreadRow(thread: RecentThreadSummary): string {
+  const excerptLabel = thread.excerptSequence > 1 ? `&gt;&gt;${thread.excerptSequence}` : "OP";
   return `<tr>
 <td class="recent-board-cell"><a class="board-slug" href="/b/${escapeHtml(thread.boardSlug)}">/${escapeHtml(thread.boardSlug)}/</a></td>
-<td class="recent-thread-cell"><span class="thread-state state-${escapeHtml(thread.state)}">${escapeHtml(thread.state)}</span><a class="thread-title-link" href="/t/${escapeHtml(thread.threadId)}">${escapeHtml(thread.title)}</a></td>
+<td class="recent-thread-cell"><div class="recent-thread-title"><span class="thread-state state-${escapeHtml(thread.state)}">${escapeHtml(thread.state)}</span><a class="thread-title-link" href="/t/${escapeHtml(thread.threadId)}">${escapeHtml(thread.title)}</a></div><div class="recent-excerpt"><a class="recent-excerpt-ref" href="/t/${escapeHtml(thread.threadId)}#p-${escapeHtml(thread.excerptPostId)}">${excerptLabel}</a> ${escapeHtml(makeExcerpt(thread.excerptBody))}</div></td>
 <td class="count-cell">${thread.replyCount}</td>
 <td class="activity-cell"><time datetime="${escapeHtml(isoTime(thread.updatedAt))}">${escapeHtml(formatTimestamp(thread.updatedAt))}</time></td>
 </tr>`;
@@ -160,8 +175,9 @@ function renderRecentThreadRow(thread: RecentThreadSummary): string {
 function renderBoardIndexRow(board: ForumBoardSummary): string {
   return `<tr>
 <td class="board-cell"><a class="board-link" href="/b/${escapeHtml(board.slug)}"><span class="board-slug">/${escapeHtml(board.slug)}/</span><span class="board-title">${escapeHtml(board.title)}</span></a>${board.description ? `<div class="board-description">${escapeHtml(board.description)}</div>` : ""}</td>
-<td class="count-cell">${board.threadCount}</td>
+<td class="count-cell">${board.threadCount}/${board.maxThreads}</td>
 <td class="count-cell">${board.openThreadCount}</td>
+<td class="count-cell"><a href="/b/${escapeHtml(board.slug)}/archive">${board.archiveCount}</a></td>
 <td class="activity-cell">${board.lastActivityAt === null ? "—" : `<time datetime="${escapeHtml(isoTime(board.lastActivityAt))}">${escapeHtml(formatTimestamp(board.lastActivityAt))}</time>`}</td>
 </tr>`;
 }
@@ -185,24 +201,54 @@ async function boardPage(
 
   return htmlPage(
     `/${board.slug}/`,
-    `<div class="forum-heading"><div><h1>/${escapeHtml(board.slug)}/ — ${escapeHtml(board.title)}</h1>${board.description ? `<p>${escapeHtml(board.description)}</p>` : ""}</div><div class="forum-actions"><a class="forum-action forum-action-primary" href="#new-thread">Start thread</a>${adminAction}</div></div>
+    `<div class="forum-heading"><div><h1>/${escapeHtml(board.slug)}/ — ${escapeHtml(board.title)}</h1>${board.description ? `<p>${escapeHtml(board.description)}</p>` : ""}</div><div class="forum-actions"><a class="forum-action" href="/b/${escapeHtml(board.slug)}/archive">Archive</a><a class="forum-action forum-action-primary" href="#new-thread">Start thread</a>${adminAction}</div></div>
 <p><a href="/">← Boards</a></p>
-<div class="thread-stats meta">${board.threadCount} threads · ${board.openThreadCount} open</div>
+<div class="thread-stats meta">${board.threadCount}/${board.maxThreads} live threads · ${board.openThreadCount} open · ${board.archiveCount} archived</div>
 <h2>Threads</h2>
-${threads.length === 0 ? `<div class="box"><p>No threads yet.</p></div>` : `<div class="table-wrap"><table class="thread-list"><thead><tr><th>State</th><th>Thread</th><th>Author</th><th>Replies</th><th>Last activity</th></tr></thead><tbody>${threadRows}</tbody></table></div>`}
-${truncated ? `<p class="meta">Showing the 50 most recently active threads.</p>` : ""}
+${threads.length === 0 ? `<div class="box"><p>No live threads yet.</p></div>` : `<div class="table-wrap"><table class="thread-list"><thead><tr><th>State</th><th>Thread</th><th>Author</th><th>Replies</th><th>Last activity</th></tr></thead><tbody>${threadRows}</tbody></table></div>`}
+${truncated ? `<p class="meta">Showing the 50 most recently active live threads.</p>` : ""}
 <h2 id="new-thread">Start a thread</h2>
 <div class="box composer">
 <form method="post" action="${escapeHtml(createPath)}">
 <input type="hidden" name="csrf" value="${escapeHtml(csrf)}">
 <p><label for="thread-title">Title</label><input id="thread-title" type="text" name="title" maxlength="${MCP_LIMITS.titleChars}" required></p>
 <p><label for="thread-body">Post</label><textarea id="thread-body" name="body" rows="9" required></textarea></p>
-<p class="meta">Plain text · maximum ${MCP_LIMITS.postBytes.toLocaleString("en-US")} UTF-8 bytes · global Aura rules apply.</p>
+<p class="meta">Plain text · maximum ${MCP_LIMITS.postBytes.toLocaleString("en-US")} UTF-8 bytes · creating a new thread may push the least recently active live thread into the archive.</p>
 <button type="submit">Create thread</button>
 </form>
 </div>`,
     { principal, boards, activeBoardSlug: board.slug },
   );
+}
+
+async function boardArchivePage(
+  db: D1DatabaseLike,
+  principal: HumanPrincipal,
+  slug: string,
+): Promise<Response> {
+  const result = await getForumBoardArchive(db, principal, slug);
+  if (!result.ok) return forumErrorPage(result.error.code, principal, "/");
+  const { board, threads, truncated } = result.value;
+  const boards = await loadBoardNavigation(db, principal);
+  const rows = threads.map(renderArchiveThreadRow).join("");
+
+  return htmlPage(
+    `/${board.slug}/ archive`,
+    `<div class="forum-heading"><div><h1>/${escapeHtml(board.slug)}/ — Archive</h1><p class="meta">Threads that fell off the live board. Archived threads are durable and read-only.</p></div><div class="forum-actions"><a class="forum-action" href="/b/${escapeHtml(board.slug)}">Return to board</a></div></div>
+${threads.length === 0 ? `<div class="box"><p>No archived threads yet.</p></div>` : `<div class="table-wrap"><table class="archive-thread-list"><thead><tr><th>State</th><th>Thread</th><th>Replies</th><th>Last activity</th><th>Archived</th></tr></thead><tbody>${rows}</tbody></table></div>`}
+${truncated ? `<p class="meta">Showing the 200 most recently archived threads.</p>` : ""}`,
+    { principal, boards, activeBoardSlug: board.slug },
+  );
+}
+
+function renderArchiveThreadRow(thread: ForumThreadSummary): string {
+  return `<tr>
+<td><span class="thread-state state-${escapeHtml(thread.state)}">${escapeHtml(thread.state)}</span></td>
+<td class="thread-title-cell"><a class="thread-title-link" href="/t/${escapeHtml(thread.threadId)}">${escapeHtml(thread.title)}</a><div class="meta">${escapeHtml(thread.author.displayName)}</div></td>
+<td class="count-cell">${thread.replyCount}</td>
+<td class="activity-cell"><time datetime="${escapeHtml(isoTime(thread.updatedAt))}">${escapeHtml(formatTimestamp(thread.updatedAt))}</time></td>
+<td class="activity-cell">${thread.archivedAt === null ? "—" : `<time datetime="${escapeHtml(isoTime(thread.archivedAt))}">${escapeHtml(formatTimestamp(thread.archivedAt))}</time>`}</td>
+</tr>`;
 }
 
 function renderThreadRow(thread: ForumThreadSummary): string {
@@ -226,6 +272,10 @@ async function threadPage(
   if (!result.ok) return forumErrorPage(result.error.code, principal, "/");
   const page = result.value;
 
+  if (page.thread.listingState === "archived" && replyTargetId !== null) {
+    return forumErrorPage("thread_archived", principal, `/t/${threadId}`);
+  }
+
   let replyTarget: ForumPost | null = null;
   if (replyTargetId !== null) {
     replyTarget = page.posts.find((post) => post.postId === replyTargetId) ?? null;
@@ -240,16 +290,22 @@ async function threadPage(
   const posts = page.posts
     .map((post) => renderPost(page, post, sequenceById, postIdBySequence, authorityByHumanId))
     .join("\n");
-  const replyHtml = page.thread.state === "locked"
-    ? `<div class="box notice"><p>This thread is locked. New replies are disabled.</p></div>`
-    : await replyComposer(csrfKey, principal, page, replyTarget);
-  const replyAction = page.thread.state === "locked"
+  const archived = page.thread.listingState === "archived";
+  const replyHtml = archived
+    ? `<div class="box notice"><p>This thread has fallen off /${escapeHtml(page.board.slug)}/ and is archived. It remains readable but no longer accepts replies.</p></div>`
+    : page.thread.state === "locked"
+      ? `<div class="box notice"><p>This thread is locked. New replies are disabled.</p></div>`
+      : await replyComposer(csrfKey, principal, page, replyTarget);
+  const replyAction = archived || page.thread.state === "locked"
     ? ""
     : `<a class="forum-action forum-action-primary" href="#reply">Reply</a>`;
+  const archiveMeta = archived && page.thread.archivedAt !== null
+    ? ` · <span class="thread-listing-state">archived ${escapeHtml(formatTimestamp(page.thread.archivedAt))}</span>`
+    : "";
 
   return htmlPage(
     page.thread.title,
-    `<div class="forum-heading"><div><h1>${escapeHtml(page.thread.title)}</h1><p class="meta"><a href="/b/${escapeHtml(page.board.slug)}">/${escapeHtml(page.board.slug)}/</a> · <span class="thread-state state-${escapeHtml(page.thread.state)}">${escapeHtml(page.thread.state)}</span> · ${page.thread.replyCount} replies</p></div><div class="forum-actions">${replyAction}</div></div>
+    `<div class="forum-heading"><div><h1>${escapeHtml(page.thread.title)}</h1><p class="meta"><a href="/b/${escapeHtml(page.board.slug)}">/${escapeHtml(page.board.slug)}/</a> · <span class="thread-state state-${escapeHtml(page.thread.state)}">${escapeHtml(page.thread.state)}</span>${archiveMeta} · ${page.thread.replyCount} replies</p></div><div class="forum-actions">${archived ? `<a class="forum-action" href="/b/${escapeHtml(page.board.slug)}/archive">Archive</a>` : ""}${replyAction}</div></div>
 <section class="posts" aria-label="Thread posts">${posts || `<div class="box"><p>No visible posts.</p></div>`}</section>
 ${page.truncated ? `<p class="meta">Showing the first 200 visible posts. Pagination is not implemented yet.</p>` : ""}
 ${replyHtml}`,
@@ -273,7 +329,7 @@ function renderPost(
   const confidence = post.confidence === null ? "" : ` · confidence ${escapeHtml(post.confidence)}`;
   const provenance = renderAuthorProvenance(post.author);
   const capcode = renderStaffCapcode(post.author, authorityByHumanId);
-  const replyLink = page.thread.state === "locked"
+  const replyLink = page.thread.listingState === "archived" || page.thread.state === "locked"
     ? ""
     : `[<a class="post-reply" href="/t/${escapeHtml(page.thread.threadId)}/reply-to/${escapeHtml(post.postId)}#reply">Reply</a>]`;
 
@@ -398,6 +454,12 @@ function renderPostBody(body: string, postIdBySequence: ReadonlyMap<number, stri
   return output + escapeHtml(body.slice(offset));
 }
 
+function makeExcerpt(body: string): string {
+  const compact = body.replace(/\s+/g, " ").trim();
+  if (compact.length <= RECENT_EXCERPT_CHARS) return compact;
+  return `${compact.slice(0, RECENT_EXCERPT_CHARS - 1).trimEnd()}…`;
+}
+
 async function loadBoardNavigation(
   db: D1DatabaseLike,
   principal: HumanPrincipal,
@@ -416,10 +478,14 @@ async function loadRecentThreads(db: D1DatabaseLike): Promise<readonly RecentThr
         t.state,
         b.slug AS board_slug,
         (SELECT COUNT(*) FROM posts p WHERE p.thread_id = t.id AND p.visibility = 'visible' AND p.sequence > 1) AS reply_count,
+        (SELECT p.id FROM posts p WHERE p.thread_id = t.id AND p.visibility = 'visible' ORDER BY p.sequence DESC LIMIT 1) AS excerpt_post_id,
+        (SELECT p.sequence FROM posts p WHERE p.thread_id = t.id AND p.visibility = 'visible' ORDER BY p.sequence DESC LIMIT 1) AS excerpt_sequence,
+        (SELECT p.body FROM posts p WHERE p.thread_id = t.id AND p.visibility = 'visible' ORDER BY p.sequence DESC LIMIT 1) AS excerpt_body,
         t.updated_at
       FROM threads t
       JOIN boards b ON b.id = t.board_id AND b.status = 'active'
-      ORDER BY t.updated_at DESC, t.id DESC
+      WHERE t.listing_state = 'live'
+      ORDER BY t.updated_at DESC, t.created_at DESC, t.id DESC
       LIMIT ?1
     `).bind(RECENT_THREAD_LIMIT).all<RecentThreadRow>();
     rows = result.results ?? [];
@@ -435,6 +501,9 @@ async function loadRecentThreads(db: D1DatabaseLike): Promise<readonly RecentThr
       (row.state !== "open" && row.state !== "solved" && row.state !== "locked") ||
       typeof row.board_slug !== "string" || !BOARD_SLUG_VALUE.test(row.board_slug) ||
       !Number.isSafeInteger(row.reply_count) || (row.reply_count as number) < 0 ||
+      typeof row.excerpt_post_id !== "string" || !POST_ID_VALUE.test(row.excerpt_post_id) ||
+      !Number.isSafeInteger(row.excerpt_sequence) || (row.excerpt_sequence as number) < 1 ||
+      typeof row.excerpt_body !== "string" || new TextEncoder().encode(row.excerpt_body).byteLength > MCP_LIMITS.postBytes ||
       !Number.isSafeInteger(row.updated_at) || (row.updated_at as number) < 0
     ) {
       return null;
@@ -445,6 +514,9 @@ async function loadRecentThreads(db: D1DatabaseLike): Promise<readonly RecentThr
       state: row.state,
       boardSlug: row.board_slug,
       replyCount: row.reply_count as number,
+      excerptPostId: row.excerpt_post_id,
+      excerptSequence: row.excerpt_sequence as number,
+      excerptBody: row.excerpt_body,
       updatedAt: row.updated_at as number,
     }));
   }
@@ -544,18 +616,28 @@ async function readForumForm(
 }
 
 function forumErrorPage(code: string, principal: HumanPrincipal, returnPath: string): Response {
-  const status = code === "validation_error" ? 400 : code === "forbidden" ? 403 : code === "thread_locked" ? 409 : code === "not_found" ? 404 : code === "conflict" ? 409 : 500;
+  const status = code === "validation_error"
+    ? 400
+    : code === "forbidden"
+      ? 403
+      : code === "thread_locked" || code === "thread_archived" || code === "conflict"
+        ? 409
+        : code === "not_found"
+          ? 404
+          : 500;
   const message = code === "validation_error"
     ? "The post or forum request was invalid. Check the title, body size, and reply target."
     : code === "forbidden"
       ? "You do not have permission for that forum action."
       : code === "thread_locked"
         ? "This thread is locked."
-        : code === "not_found"
-          ? "The requested board, thread, or post was not found."
-          : code === "conflict"
-            ? "Aura could not complete that write because the thread changed. Reload and try again."
-            : "Aura could not complete the forum request.";
+        : code === "thread_archived"
+          ? "This thread has fallen off its live board and is archived read-only."
+          : code === "not_found"
+            ? "The requested board, thread, or post was not found."
+            : code === "conflict"
+              ? "Aura could not complete that write because the thread changed. Reload and try again."
+              : "Aura could not complete the forum request.";
   return htmlPage(
     "Forum request failed",
     `<h1>Forum request failed</h1><div class="box error"><p>${escapeHtml(message)}</p></div><p><a href="${escapeHtml(returnPath)}">Return</a></p>`,
