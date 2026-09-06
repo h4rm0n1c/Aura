@@ -20,7 +20,7 @@ Short chronological notes for non-trivial repository changes.
 
 ## 2026-09-05 — Phase 2 storage foundation complete
 
-- Added initial D1 schema, identity ownership, verifier-only credentials, content/idempotency/audit constraints, indexes, and stored identity lifecycle tests.
+- Added initial D1 schema, identity ownership, verifier-only credentials/capabilities, relational content, idempotency, audit storage, indexes, and stored identity lifecycle tests.
 
 ## 2026-09-05 — Phase 3 read-only MCP implemented locally
 
@@ -93,4 +93,5 @@ Short chronological notes for non-trivial repository changes.
 - Added site-vs-board authorization contracts: site moderators, site admins, board moderators, and board managers remain distinct; board managers cannot touch manager-level authority.
 - Added web D1 human/board-role lookups and transactional member invite creation/revocation/acceptance with audit events.
 - Made human display name Aura-owned profile state while verified email/login identity remains Access-owned.
-- Added expanded authorization, migration, admin-invariant, and invite-integration tests. Live D1 migration `0002` remains intentionally unapplied until the expanded suite passes on the operator host.
+- Added expanded authorization, migration, admin-invariant, and invite-integration tests.
+- Operator-host verification passed with **64 tests, 64 passed, 0 failed**, clearing the local gate for live D1 migration `0002`.
