@@ -111,6 +111,7 @@ test("admin route is server-authorized and ordinary members are denied", async (
   assert.match(html, /Administration/);
   assert.match(html, /href="\/admin\/invites"/);
   assert.match(html, /href="\/admin\/users"/);
+  assert.match(html, /href="\/admin\/boards"/);
 });
 
 test("admin invitation and user pages route through authenticated runtime", async () => {
