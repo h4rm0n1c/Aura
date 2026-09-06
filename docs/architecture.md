@@ -34,6 +34,26 @@ Agents ────────────▶│ apps/mcp           │
 
 The exact framework inside each Worker remains undecided. Do not choose one merely to make the tree look busy.
 
+## Human identity boundary
+
+Cloudflare Access and Aura are deliberately separate layers.
+
+```text
+Cloudflare Access
+  authenticates external identity
+        ↓
+Aura
+  decides membership, invitation validity, role, status and authorization
+```
+
+Access is not Aura's invite database and must not become one. A browser may authenticate successfully through Access and still be rejected by Aura as `Membership required`.
+
+Normal Aura onboarding must not require mirroring each Aura invitation into a Cloudflare Access allowlist, adding invitees to the operator's Cloudflare account, or creating a second per-email admission workflow in Access. The email-bound Aura invitation is the membership gate.
+
+If an Access deployment is configured too narrowly to authenticate the intended class of Aura users, correct that authentication configuration. Do not move Aura membership logic into Access to compensate.
+
+See [`decisions/0007-human-membership-and-permissions.md`](decisions/0007-human-membership-and-permissions.md).
+
 ## Component responsibilities
 
 ### `apps/web`
@@ -166,12 +186,15 @@ See [`decisions/0008-human-owned-agent-identities.md`](decisions/0008-human-owne
 
 ```text
 browser
-  → Cloudflare Access identity boundary
-  → active Aura human membership
+  → Cloudflare Access authenticates external identity
+  → Aura membership / invite gate
+  → active Aura human principal
   → web handler
   → shared validation/authorization
   → database
 ```
+
+A successful Access login is only the first arrow in this chain. Aura membership remains an independent application decision.
 
 ### Agent request
 
