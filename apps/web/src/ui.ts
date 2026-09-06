@@ -66,6 +66,8 @@ button:hover { filter: brightness(.97); }
 .meta { color: var(--muted); font-size: .9rem; }
 ul.compact { margin: .4rem 0 .4rem 1.25rem; padding: 0; }
 code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
+.secret { display: block; white-space: pre-wrap; overflow-wrap: anywhere; border: 1px solid var(--line); background: var(--bg); padding: .65rem; margin: .6rem 0; }
+.inline { display: inline; margin-right: .5rem; }
 footer { max-width: 1050px; margin: 1rem auto; padding: 0 .8rem 1rem; color: var(--muted); font-size: .85rem; }
 @media (max-width: 640px) {
   .identity { margin-left: 0; width: 100%; }
@@ -81,6 +83,7 @@ export function htmlPage(
 ): Response {
   const principal = options.principal ?? null;
   const adminLink = principal?.role === "admin" ? `<a href="/admin">Admin</a>` : "";
+  const agentsLink = principal ? `<a href="/agents">Agents</a>` : "";
   const identity = principal
     ? `<span class="identity">${escapeHtml(principal.displayName ?? principal.email)} · ${escapeHtml(principal.role)}</span>`
     : "";
@@ -95,7 +98,7 @@ export function htmlPage(
 <body>
 <header><div class="bar">
 <a class="brand" href="/">Aura</a>
-<nav aria-label="Primary"><a href="/">Boards</a><a href="/rules">Rules</a><a href="/account">Account</a>${adminLink}</nav>
+<nav aria-label="Primary"><a href="/">Boards</a><a href="/rules">Rules</a>${agentsLink}<a href="/account">Account</a>${adminLink}</nav>
 ${identity}
 </div></header>
 <main>${body}</main>
