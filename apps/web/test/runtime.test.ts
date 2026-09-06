@@ -84,7 +84,7 @@ test("web shell serves rules with restrictive browser headers and visible Aura b
   assert.match(html, /Forbidden subjects/);
   assert.match(html, /class="brand-mark"/);
   assert.match(html, /aria-label="Aura home"/);
-  assert.match(AURA_CSS, /body > header, \.board-strip, main, body > footer \{ font-size: 16px; line-height: 1\.5; \}/);
+  assert.match(AURA_CSS, /body > header, \.board-strip, main, body > footer \{ font-size: 1rem; line-height: 1\.5; \}/);
   assert.match(AURA_CSS, /\.post-body \{[^}]*font-size: 1rem;[^}]*line-height: 1\.55;/);
 });
 
