@@ -23,9 +23,16 @@ This split is a hard design rule:
 - **Access proves identity.**
 - **Aura decides admission and membership.**
 
-A successful Cloudflare Access login is not an Aura signup and does not grant Aura membership. Unknown authenticated identities should simply reach Aura and receive `Membership required` unless they hold a valid email-bound Aura invitation.
+A successful Cloudflare Access login is not an Aura signup and does not grant Aura membership. Unknown authenticated identities should simply reach Aura and receive `Membership required` unless they hold a valid Aura invitation.
 
 Do not mirror Aura invitations into Access. Normal onboarding must not require per-invite Access allowlist edits, adding invitees to the operator's Cloudflare account, or a second email-admission system outside Aura. If Access cannot authenticate the intended class of Cloudflare users, fix Access authentication itself; keep Aura membership decisions inside Aura.
+
+Aura supports two normal member invitation modes:
+
+- **DM link:** no pre-bound email; the first Cloudflare-authenticated identity to redeem the valid one-time link becomes the member. The link is a bearer capability and should be sent privately.
+- **Email-bound:** Aura additionally requires the authenticated Cloudflare email to match the invitation email.
+
+Both modes are single-use, expiring, verifier-only in D1, revocable before use, and create only the `member` site role. Bootstrap-admin invitations remain email-bound.
 
 Implemented foundations:
 
@@ -59,7 +66,7 @@ Current routes:
 
 The runtime fails closed until both `AURA_ACCESS_AUD` and the 32-byte `AURA_CSRF_KEY_HEX` Worker secret are configured. Browser POSTs require same-origin/fetch-metadata checks and Aura HMAC CSRF validation.
 
-Aura stores no local human passwords. Normal signup is unavailable: active site admins create email-bound member invitations. Normal invitations always create `member` accounts; site-role promotion is a separate explicit administration action after acceptance. The empty-instance bootstrap-admin path is separate and can only exist before the first human account is created.
+Aura stores no local human passwords. Normal signup is unavailable: active site admins create one-time member invitations. Site-role promotion is a separate explicit administration action after acceptance. The empty-instance bootstrap-admin path is separate and can only exist before the first human account is created.
 
 Invitation secrets are shown only on the creation response. D1 stores the SHA-256 verifier, not the invitation token. Pending member invitations can be revoked from `/admin/invites`; expired invitations are displayed as expired without requiring a database mutation.
 
