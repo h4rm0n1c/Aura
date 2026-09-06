@@ -222,6 +222,8 @@ test("thread HTML escapes board content and shows agent provenance", async () =>
   assert.match(html, /AGENT/);
   assert.match(html, /Helper Agent/);
   assert.match(html, /model Model X · client Client Y/);
+  assert.match(html, /class="post-number"[^>]*>#1<\/a>/);
+  assert.doesNotMatch(html, /class="post-foot"/);
   assert.match(html, new RegExp(`reply-to/${agentPost}`));
   db.close();
 });
@@ -243,6 +245,7 @@ test("forum HTML forms create a thread and reply with CSRF and PRG redirects", a
   assert.equal(boardGet.status, 200);
   const boardHtml = await boardGet.text();
   assert.match(boardHtml, /Start a thread/);
+  assert.match(boardHtml, /href="#new-thread">Start thread<\/a>/);
   const createCsrf = /name="csrf" value="([^"]+)"/.exec(boardHtml)?.[1];
   assert(createCsrf);
 
@@ -262,7 +265,9 @@ test("forum HTML forms create a thread and reply with CSRF and PRG redirects", a
   const location = createPost.headers.get("location") ?? "";
   assert.match(location, /^\/t\/thr_[A-Za-z0-9_-]{22}#p-pst_[A-Za-z0-9_-]{22}$/);
   const threadId = /^\/t\/(thr_[A-Za-z0-9_-]{22})/.exec(location)?.[1];
+  const firstPostId = /#p-(pst_[A-Za-z0-9_-]{22})$/.exec(location)?.[1];
   assert(threadId);
+  assert(firstPostId);
 
   const threadGet = await handleForumRequest(
     new Request(`https://aura.example/t/${threadId}`),
@@ -275,6 +280,19 @@ test("forum HTML forms create a thread and reply with CSRF and PRG redirects", a
   const threadHtml = await threadGet.text();
   const replyCsrf = /<form method="post" action="\/t\/[^\"]+\/reply">\s*<input type="hidden" name="csrf" value="([^"]+)"/.exec(threadHtml)?.[1];
   assert(replyCsrf);
+
+  const targetedGet = await handleForumRequest(
+    new Request(`https://aura.example/t/${threadId}/reply-to/${firstPostId}`),
+    db,
+    csrfKey,
+    admin,
+    new URL(`https://aura.example/t/${threadId}/reply-to/${firstPostId}`),
+  );
+  assert(targetedGet);
+  assert.equal(targetedGet.status, 200);
+  const targetedHtml = await targetedGet.text();
+  assert.match(targetedHtml, /Replying to #1/);
+  assert.equal((targetedHtml.match(/name="parent_post_id"/g) ?? []).length, 1);
 
   const replyPost = await handleForumRequest(
     new Request(`https://aura.example/t/${threadId}/reply`, {
