@@ -13,7 +13,10 @@ import { resultChanges, type D1DatabaseLike } from "../db/d1.ts";
 
 const BOARD_SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const THREAD_PAGE_LIMIT = 50;
+const ARCHIVE_PAGE_LIMIT = 200;
 const POST_PAGE_LIMIT = 200;
+
+export type ThreadListingState = "live" | "archived";
 
 export interface ForumAuthor {
   readonly kind: "human" | "agent" | "system";
@@ -29,8 +32,10 @@ export interface ForumBoardSummary {
   readonly slug: string;
   readonly title: string;
   readonly description: string;
+  readonly maxThreads: number;
   readonly threadCount: number;
   readonly openThreadCount: number;
+  readonly archiveCount: number;
   readonly lastActivityAt: number | null;
 }
 
@@ -39,12 +44,20 @@ export interface ForumThreadSummary {
   readonly boardId: string;
   readonly title: string;
   readonly state: ThreadState;
+  readonly listingState: ThreadListingState;
+  readonly archivedAt: number | null;
   readonly author: ForumAuthor;
   readonly replyCount: number;
   readonly updatedAt: number;
 }
 
 export interface ForumBoardPage {
+  readonly board: ForumBoardSummary;
+  readonly threads: readonly ForumThreadSummary[];
+  readonly truncated: boolean;
+}
+
+export interface ForumBoardArchivePage {
   readonly board: ForumBoardSummary;
   readonly threads: readonly ForumThreadSummary[];
   readonly truncated: boolean;
@@ -77,8 +90,10 @@ interface BoardRow {
   readonly slug: unknown;
   readonly title: unknown;
   readonly description: unknown;
+  readonly max_threads: unknown;
   readonly thread_count: unknown;
   readonly open_thread_count: unknown;
+  readonly archive_count: unknown;
   readonly last_activity_at: unknown;
 }
 
@@ -87,6 +102,8 @@ interface ThreadRow {
   readonly board_id: unknown;
   readonly title: unknown;
   readonly state: unknown;
+  readonly listing_state: unknown;
+  readonly archived_at: unknown;
   readonly author_kind: unknown;
   readonly author_human_id: unknown;
   readonly author_agent_id: unknown;
@@ -119,6 +136,7 @@ interface ThreadStateRow {
   readonly id: unknown;
   readonly board_id: unknown;
   readonly state: unknown;
+  readonly listing_state: unknown;
   readonly board_status: unknown;
 }
 
@@ -137,9 +155,11 @@ export async function listForumBoards(
         b.slug,
         b.title,
         b.description,
-        (SELECT COUNT(*) FROM threads t WHERE t.board_id = b.id) AS thread_count,
-        (SELECT COUNT(*) FROM threads t WHERE t.board_id = b.id AND t.state = 'open') AS open_thread_count,
-        (SELECT MAX(t.updated_at) FROM threads t WHERE t.board_id = b.id) AS last_activity_at
+        b.max_threads,
+        (SELECT COUNT(*) FROM threads t WHERE t.board_id = b.id AND t.listing_state = 'live') AS thread_count,
+        (SELECT COUNT(*) FROM threads t WHERE t.board_id = b.id AND t.listing_state = 'live' AND t.state = 'open') AS open_thread_count,
+        (SELECT COUNT(*) FROM threads t WHERE t.board_id = b.id AND t.listing_state = 'archived') AS archive_count,
+        (SELECT MAX(t.updated_at) FROM threads t WHERE t.board_id = b.id AND t.listing_state = 'live') AS last_activity_at
       FROM boards b
       WHERE b.status = 'active'
       ORDER BY b.sort_order ASC, b.slug ASC, b.id ASC
@@ -170,41 +190,10 @@ export async function getForumBoard(
   const board = await loadActiveBoard(db, slug);
   if (board === null) return fail("not_found");
 
-  let rows: readonly ThreadRow[];
-  try {
-    const result = await db.prepare(`
-      SELECT
-        t.id,
-        t.board_id,
-        t.title,
-        t.state,
-        t.author_kind,
-        t.author_human_id,
-        t.author_agent_id,
-        COALESCE(h.display_name, h.email) AS human_name,
-        a.name AS agent_name,
-        a.model AS agent_model,
-        a.client AS agent_client,
-        (SELECT COUNT(*) FROM posts p WHERE p.thread_id = t.id AND p.visibility = 'visible' AND p.sequence > 1) AS reply_count,
-        t.updated_at
-      FROM threads t
-      LEFT JOIN humans h ON h.id = t.author_human_id
-      LEFT JOIN agents a ON a.id = t.author_agent_id
-      WHERE t.board_id = ?1
-      ORDER BY t.updated_at DESC, t.id DESC
-      LIMIT ?2
-    `).bind(board.boardId, THREAD_PAGE_LIMIT + 1).all<ThreadRow>();
-    rows = result.results ?? [];
-  } catch {
-    return fail("internal_error");
-  }
-
-  const threads: ForumThreadSummary[] = [];
-  for (const row of rows.slice(0, THREAD_PAGE_LIMIT)) {
-    const parsed = parseThread(row);
-    if (parsed === null) return fail("internal_error");
-    threads.push(Object.freeze(parsed));
-  }
+  const rows = await loadBoardThreads(db, board.boardId, "live", THREAD_PAGE_LIMIT + 1);
+  if (rows === null) return fail("internal_error");
+  const threads = parseThreads(rows.slice(0, THREAD_PAGE_LIMIT));
+  if (threads === null) return fail("internal_error");
 
   return {
     ok: true,
@@ -212,6 +201,33 @@ export async function getForumBoard(
       board,
       threads: Object.freeze(threads),
       truncated: rows.length > THREAD_PAGE_LIMIT,
+    }),
+  };
+}
+
+export async function getForumBoardArchive(
+  db: D1DatabaseLike,
+  principal: HumanPrincipal,
+  slug: string,
+): Promise<ForumResult<ForumBoardArchivePage>> {
+  const authorized = authorizeBoardRead(principal);
+  if (!authorized.ok) return authorized;
+  if (!validSlug(slug)) return fail("validation_error");
+
+  const board = await loadActiveBoard(db, slug);
+  if (board === null) return fail("not_found");
+
+  const rows = await loadBoardThreads(db, board.boardId, "archived", ARCHIVE_PAGE_LIMIT + 1);
+  if (rows === null) return fail("internal_error");
+  const threads = parseThreads(rows.slice(0, ARCHIVE_PAGE_LIMIT));
+  if (threads === null) return fail("internal_error");
+
+  return {
+    ok: true,
+    value: Object.freeze({
+      board,
+      threads: Object.freeze(threads),
+      truncated: rows.length > ARCHIVE_PAGE_LIMIT,
     }),
   };
 }
@@ -234,6 +250,8 @@ export async function getForumThread(
         t.board_id,
         t.title,
         t.state,
+        t.listing_state,
+        t.archived_at,
         t.author_kind,
         t.author_human_id,
         t.author_agent_id,
@@ -258,9 +276,11 @@ export async function getForumThread(
         b.slug,
         b.title,
         b.description,
-        (SELECT COUNT(*) FROM threads t WHERE t.board_id = b.id) AS thread_count,
-        (SELECT COUNT(*) FROM threads t WHERE t.board_id = b.id AND t.state = 'open') AS open_thread_count,
-        (SELECT MAX(t.updated_at) FROM threads t WHERE t.board_id = b.id) AS last_activity_at
+        b.max_threads,
+        (SELECT COUNT(*) FROM threads t WHERE t.board_id = b.id AND t.listing_state = 'live') AS thread_count,
+        (SELECT COUNT(*) FROM threads t WHERE t.board_id = b.id AND t.listing_state = 'live' AND t.state = 'open') AS open_thread_count,
+        (SELECT COUNT(*) FROM threads t WHERE t.board_id = b.id AND t.listing_state = 'archived') AS archive_count,
+        (SELECT MAX(t.updated_at) FROM threads t WHERE t.board_id = b.id AND t.listing_state = 'live') AS last_activity_at
       FROM boards b
       WHERE b.id = ?1 AND b.status = 'active'
       LIMIT 1
@@ -385,6 +405,7 @@ export async function createHumanReply(
 
   const state = await loadThreadState(db, input.threadId);
   if (state === null || state.boardStatus !== "active") return fail("not_found");
+  if (state.listingState === "archived") return fail("thread_archived");
   const authorized = authorizeThreadReply(principal, state.state);
   if (!authorized.ok) return authorized;
 
@@ -406,7 +427,7 @@ export async function createHumanReply(
           'human', ?3, NULL, ?4, NULL, ?5, 'visible', NULL, NULL, ?6
         )
       `).bind(postId, input.threadId, principal.humanId, input.body, parentPostId, nowSeconds),
-      db.prepare("UPDATE threads SET updated_at = ?1 WHERE id = ?2")
+      db.prepare("UPDATE threads SET updated_at = ?1 WHERE id = ?2 AND listing_state = 'live'")
         .bind(nowSeconds, input.threadId),
     ]);
     if (resultChanges(results[0]) !== 1 || resultChanges(results[1]) !== 1) return fail("conflict");
@@ -415,6 +436,57 @@ export async function createHumanReply(
   }
 
   return { ok: true, value: Object.freeze({ threadId: input.threadId, postId }) };
+}
+
+async function loadBoardThreads(
+  db: D1DatabaseLike,
+  boardId: string,
+  listingState: ThreadListingState,
+  limit: number,
+): Promise<readonly ThreadRow[] | null> {
+  try {
+    const result = await db.prepare(`
+      SELECT
+        t.id,
+        t.board_id,
+        t.title,
+        t.state,
+        t.listing_state,
+        t.archived_at,
+        t.author_kind,
+        t.author_human_id,
+        t.author_agent_id,
+        COALESCE(h.display_name, h.email) AS human_name,
+        a.name AS agent_name,
+        a.model AS agent_model,
+        a.client AS agent_client,
+        (SELECT COUNT(*) FROM posts p WHERE p.thread_id = t.id AND p.visibility = 'visible' AND p.sequence > 1) AS reply_count,
+        t.updated_at
+      FROM threads t
+      LEFT JOIN humans h ON h.id = t.author_human_id
+      LEFT JOIN agents a ON a.id = t.author_agent_id
+      WHERE t.board_id = ?1 AND t.listing_state = ?2
+      ORDER BY
+        CASE WHEN ?2 = 'archived' THEN t.archived_at END DESC,
+        t.updated_at DESC,
+        t.created_at DESC,
+        t.id DESC
+      LIMIT ?3
+    `).bind(boardId, listingState, limit).all<ThreadRow>();
+    return result.results ?? [];
+  } catch {
+    return null;
+  }
+}
+
+function parseThreads(rows: readonly ThreadRow[]): ForumThreadSummary[] | null {
+  const threads: ForumThreadSummary[] = [];
+  for (const row of rows) {
+    const parsed = parseThread(row);
+    if (parsed === null) return null;
+    threads.push(Object.freeze(parsed));
+  }
+  return threads;
 }
 
 async function loadActiveBoard(db: D1DatabaseLike, slug: string): Promise<ForumBoardSummary | null> {
@@ -426,9 +498,11 @@ async function loadActiveBoard(db: D1DatabaseLike, slug: string): Promise<ForumB
         b.slug,
         b.title,
         b.description,
-        (SELECT COUNT(*) FROM threads t WHERE t.board_id = b.id) AS thread_count,
-        (SELECT COUNT(*) FROM threads t WHERE t.board_id = b.id AND t.state = 'open') AS open_thread_count,
-        (SELECT MAX(t.updated_at) FROM threads t WHERE t.board_id = b.id) AS last_activity_at
+        b.max_threads,
+        (SELECT COUNT(*) FROM threads t WHERE t.board_id = b.id AND t.listing_state = 'live') AS thread_count,
+        (SELECT COUNT(*) FROM threads t WHERE t.board_id = b.id AND t.listing_state = 'live' AND t.state = 'open') AS open_thread_count,
+        (SELECT COUNT(*) FROM threads t WHERE t.board_id = b.id AND t.listing_state = 'archived') AS archive_count,
+        (SELECT MAX(t.updated_at) FROM threads t WHERE t.board_id = b.id AND t.listing_state = 'live') AS last_activity_at
       FROM boards b
       WHERE b.slug = ?1 AND b.status = 'active'
       LIMIT 1
@@ -452,11 +526,15 @@ async function isActiveBoard(db: D1DatabaseLike, boardId: string): Promise<boole
 async function loadThreadState(
   db: D1DatabaseLike,
   threadId: string,
-): Promise<{ readonly state: ThreadState; readonly boardStatus: "active" | "archived" } | null> {
+): Promise<{
+  readonly state: ThreadState;
+  readonly listingState: ThreadListingState;
+  readonly boardStatus: "active" | "archived";
+} | null> {
   let row: ThreadStateRow | null;
   try {
     row = await db.prepare(`
-      SELECT t.id, t.board_id, t.state, b.status AS board_status
+      SELECT t.id, t.board_id, t.state, t.listing_state, b.status AS board_status
       FROM threads t
       JOIN boards b ON b.id = t.board_id
       WHERE t.id = ?1
@@ -470,11 +548,12 @@ async function loadThreadState(
     !isAuraId("thread", row.id) ||
     !isAuraId("board", row.board_id) ||
     !isThreadState(row.state) ||
+    !isThreadListingState(row.listing_state) ||
     (row.board_status !== "active" && row.board_status !== "archived")
   ) {
     return null;
   }
-  return { state: row.state, boardStatus: row.board_status };
+  return { state: row.state, listingState: row.listing_state, boardStatus: row.board_status };
 }
 
 async function isVisiblePostInThread(db: D1DatabaseLike, threadId: string, postId: string): Promise<boolean> {
@@ -496,9 +575,12 @@ function parseBoard(row: BoardRow): ForumBoardSummary | null {
     !validSlug(row.slug) ||
     !boundedString(row.title, 1, 120) ||
     !boundedString(row.description, 0, 1024) ||
+    !validMaxThreads(row.max_threads) ||
     !validCount(row.thread_count) ||
     !validCount(row.open_thread_count) ||
+    !validCount(row.archive_count) ||
     row.open_thread_count > row.thread_count ||
+    row.thread_count > row.max_threads ||
     !(row.last_activity_at === null || validTimestamp(row.last_activity_at))
   ) {
     return null;
@@ -508,8 +590,10 @@ function parseBoard(row: BoardRow): ForumBoardSummary | null {
     slug: row.slug,
     title: row.title,
     description: row.description,
+    maxThreads: row.max_threads,
     threadCount: row.thread_count,
     openThreadCount: row.open_thread_count,
+    archiveCount: row.archive_count,
     lastActivityAt: row.last_activity_at,
   };
 }
@@ -520,6 +604,11 @@ function parseThread(row: ThreadRow): ForumThreadSummary | null {
     !isAuraId("board", row.board_id) ||
     !validTitle(row.title) ||
     !isThreadState(row.state) ||
+    !isThreadListingState(row.listing_state) ||
+    !(
+      (row.listing_state === "live" && row.archived_at === null) ||
+      (row.listing_state === "archived" && validTimestamp(row.archived_at))
+    ) ||
     !validCount(row.reply_count) ||
     !validTimestamp(row.updated_at)
   ) {
@@ -532,6 +621,8 @@ function parseThread(row: ThreadRow): ForumThreadSummary | null {
     boardId: row.board_id,
     title: row.title,
     state: row.state,
+    listingState: row.listing_state,
+    archivedAt: row.archived_at,
     author,
     replyCount: row.reply_count,
     updatedAt: row.updated_at,
@@ -634,12 +725,20 @@ function isThreadState(value: unknown): value is ThreadState {
   return value === "open" || value === "solved" || value === "locked";
 }
 
+function isThreadListingState(value: unknown): value is ThreadListingState {
+  return value === "live" || value === "archived";
+}
+
 function boundedString(value: unknown, min: number, max: number): value is string {
   return typeof value === "string" && value.length >= min && value.length <= max;
 }
 
 function validCount(value: unknown): value is number {
   return Number.isSafeInteger(value) && (value as number) >= 0;
+}
+
+function validMaxThreads(value: unknown): value is number {
+  return Number.isSafeInteger(value) && (value as number) >= 1 && (value as number) <= 10000;
 }
 
 function validTimestamp(value: unknown): value is number {
@@ -650,6 +749,8 @@ function utf8Bytes(value: string): number {
   return new TextEncoder().encode(value).byteLength;
 }
 
-function fail(code: "forbidden" | "thread_locked" | "not_found" | "validation_error" | "conflict" | "internal_error") {
+function fail(
+  code: "forbidden" | "thread_locked" | "thread_archived" | "not_found" | "validation_error" | "conflict" | "internal_error",
+) {
   return { ok: false as const, error: domainError(code) };
 }
