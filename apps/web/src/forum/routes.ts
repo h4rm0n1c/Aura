@@ -89,10 +89,13 @@ async function boardIndexPage(db: D1DatabaseLike, principal: HumanPrincipal): Pr
   const empty = principal.role === "admin"
     ? `<div class="box"><p>No active boards exist.</p><p><a href="/admin/boards">Create the first board</a>.</p></div>`
     : `<div class="box"><p>No active boards exist.</p></div>`;
+  const adminAction = principal.role === "admin"
+    ? `<a class="forum-action" href="/admin/boards">Manage boards</a>`
+    : "";
 
   return htmlPage(
     "Boards",
-    `<div class="forum-heading"><div><h1>Boards</h1><p class="meta">Human and agent discussion in the same durable threads.</p></div></div>
+    `<div class="forum-heading"><div><h1>Boards</h1><p class="meta">Human and agent discussion in the same durable threads.</p></div><div class="forum-actions">${adminAction}</div></div>
 ${result.value.length === 0 ? empty : `<div class="table-wrap"><table class="board-index"><thead><tr><th>Board</th><th>Threads</th><th>Open</th><th>Last activity</th></tr></thead><tbody>${rows}</tbody></table></div>`}`,
     { principal },
   );
@@ -100,10 +103,10 @@ ${result.value.length === 0 ? empty : `<div class="table-wrap"><table class="boa
 
 function renderBoardIndexRow(board: ForumBoardSummary): string {
   return `<tr>
-<td><a class="board-link" href="/b/${escapeHtml(board.slug)}"><strong>/${escapeHtml(board.slug)}/ — ${escapeHtml(board.title)}</strong></a>${board.description ? `<br><span class="meta">${escapeHtml(board.description)}</span>` : ""}</td>
-<td>${board.threadCount}</td>
-<td>${board.openThreadCount}</td>
-<td>${board.lastActivityAt === null ? "—" : `<time datetime="${escapeHtml(isoTime(board.lastActivityAt))}">${escapeHtml(formatTimestamp(board.lastActivityAt))}</time>`}</td>
+<td class="board-cell"><a class="board-link" href="/b/${escapeHtml(board.slug)}"><span class="board-slug">/${escapeHtml(board.slug)}/</span><span class="board-title">${escapeHtml(board.title)}</span></a>${board.description ? `<div class="board-description">${escapeHtml(board.description)}</div>` : ""}</td>
+<td class="count-cell">${board.threadCount}</td>
+<td class="count-cell">${board.openThreadCount}</td>
+<td class="activity-cell">${board.lastActivityAt === null ? "—" : `<time datetime="${escapeHtml(isoTime(board.lastActivityAt))}">${escapeHtml(formatTimestamp(board.lastActivityAt))}</time>`}</td>
 </tr>`;
 }
 
@@ -119,13 +122,13 @@ async function boardPage(
   const createPath = `/b/${board.slug}/threads`;
   const csrf = await issueForumCsrf(csrfKey, principal, createPath);
   const threadRows = threads.map(renderThreadRow).join("");
-  const admin = principal.role === "admin"
-    ? `<a href="/admin/boards/${escapeHtml(board.boardId)}">Board settings</a>`
+  const adminAction = principal.role === "admin"
+    ? `<a class="forum-action" href="/admin/boards/${escapeHtml(board.boardId)}">Board settings</a>`
     : "";
 
   return htmlPage(
     `/${board.slug}/`,
-    `<div class="forum-heading"><div><h1>/${escapeHtml(board.slug)}/ — ${escapeHtml(board.title)}</h1>${board.description ? `<p>${escapeHtml(board.description)}</p>` : ""}</div><div class="forum-actions">${admin}</div></div>
+    `<div class="forum-heading"><div><h1>/${escapeHtml(board.slug)}/ — ${escapeHtml(board.title)}</h1>${board.description ? `<p>${escapeHtml(board.description)}</p>` : ""}</div><div class="forum-actions"><a class="forum-action forum-action-primary" href="#new-thread">Start thread</a>${adminAction}</div></div>
 <p><a href="/">← Boards</a></p>
 <div class="thread-stats meta">${board.threadCount} threads · ${board.openThreadCount} open</div>
 <h2>Threads</h2>
@@ -148,10 +151,10 @@ ${truncated ? `<p class="meta">Showing the 50 most recently active threads.</p>`
 function renderThreadRow(thread: ForumThreadSummary): string {
   return `<tr>
 <td><span class="thread-state state-${escapeHtml(thread.state)}">${escapeHtml(thread.state)}</span></td>
-<td><a href="/t/${escapeHtml(thread.threadId)}"><strong>${escapeHtml(thread.title)}</strong></a><br><span class="meta"><code>${escapeHtml(thread.threadId)}</code></span></td>
+<td class="thread-title-cell"><a class="thread-title-link" href="/t/${escapeHtml(thread.threadId)}">${escapeHtml(thread.title)}</a></td>
 <td>${renderCompactAuthor(thread.author)}</td>
-<td>${thread.replyCount}</td>
-<td><time datetime="${escapeHtml(isoTime(thread.updatedAt))}">${escapeHtml(formatTimestamp(thread.updatedAt))}</time></td>
+<td class="count-cell">${thread.replyCount}</td>
+<td class="activity-cell"><time datetime="${escapeHtml(isoTime(thread.updatedAt))}">${escapeHtml(formatTimestamp(thread.updatedAt))}</time></td>
 </tr>`;
 }
 
@@ -177,10 +180,13 @@ async function threadPage(
   const replyHtml = page.thread.state === "locked"
     ? `<div class="box notice"><p>This thread is locked. New replies are disabled.</p></div>`
     : await replyComposer(csrfKey, principal, page, replyTarget);
+  const replyAction = page.thread.state === "locked"
+    ? ""
+    : `<a class="forum-action forum-action-primary" href="#reply">Reply</a>`;
 
   return htmlPage(
     page.thread.title,
-    `<div class="forum-heading"><div><h1>${escapeHtml(page.thread.title)}</h1><p class="meta"><a href="/b/${escapeHtml(page.board.slug)}">/${escapeHtml(page.board.slug)}/</a> · <span class="thread-state state-${escapeHtml(page.thread.state)}">${escapeHtml(page.thread.state)}</span> · ${page.thread.replyCount} replies</p></div></div>
+    `<div class="forum-heading"><div><h1>${escapeHtml(page.thread.title)}</h1><p class="meta"><a href="/b/${escapeHtml(page.board.slug)}">/${escapeHtml(page.board.slug)}/</a> · <span class="thread-state state-${escapeHtml(page.thread.state)}">${escapeHtml(page.thread.state)}</span> · ${page.thread.replyCount} replies</p></div><div class="forum-actions">${replyAction}</div></div>
 <section class="posts" aria-label="Thread posts">${posts || `<div class="box"><p>No visible posts.</p></div>`}</section>
 ${page.truncated ? `<p class="meta">Showing the first 200 visible posts. Pagination is not implemented yet.</p>` : ""}
 ${replyHtml}`,
@@ -203,13 +209,12 @@ function renderPost(
   const provenance = renderAuthorProvenance(post.author);
   const replyLink = page.thread.state === "locked"
     ? ""
-    : `<a href="/t/${escapeHtml(page.thread.threadId)}/reply-to/${escapeHtml(post.postId)}#reply">reply</a>`;
+    : `<a class="post-reply" href="/t/${escapeHtml(page.thread.threadId)}/reply-to/${escapeHtml(post.postId)}#reply">reply</a>`;
 
   return `<article class="post post-${escapeHtml(post.author.kind)}" id="p-${escapeHtml(post.postId)}">
-<header class="post-head"><span class="author-kind">${post.author.kind.toUpperCase()}</span> <strong>${escapeHtml(post.author.displayName)}</strong> <a class="post-number" href="#p-${escapeHtml(post.postId)}">#${post.sequence}</a> <time datetime="${escapeHtml(isoTime(post.createdAt))}">${escapeHtml(formatTimestamp(post.createdAt))}</time>${confidence} ${parent} <span class="post-actions">${replyLink}</span></header>
+<header class="post-head"><div class="post-meta"><a class="post-number" href="#p-${escapeHtml(post.postId)}" aria-label="Permanent link to post ${post.sequence}">#${post.sequence}</a><span class="author-kind">${post.author.kind.toUpperCase()}</span><strong class="post-author">${escapeHtml(post.author.displayName)}</strong><span class="post-secondary"><time datetime="${escapeHtml(isoTime(post.createdAt))}">${escapeHtml(formatTimestamp(post.createdAt))}</time>${confidence} ${parent}</span></div><div class="post-actions">${replyLink}</div></header>
 ${provenance}
 <div class="post-body">${escapeHtml(post.body)}</div>
-<footer class="post-foot"><code>${escapeHtml(post.postId)}</code></footer>
 </article>`;
 }
 
@@ -223,7 +228,7 @@ async function replyComposer(
   const csrf = await issueForumCsrf(csrfKey, principal, path);
   const target = replyTarget === null
     ? ""
-    : `<div class="notice reply-target"><strong>Replying to #${replyTarget.sequence}</strong> — ${escapeHtml(replyTarget.author.displayName)} <a href="/t/${escapeHtml(page.thread.threadId)}#p-${escapeHtml(replyTarget.postId)}">view post</a> · <a href="/t/${escapeHtml(page.thread.threadId)}#reply">clear</a></div><input type="hidden" name="parent_post_id" value="${escapeHtml(replyTarget.postId)}">`;
+    : `<div class="notice reply-target"><strong>Replying to #${replyTarget.sequence}</strong> — ${escapeHtml(replyTarget.author.displayName)} <a href="/t/${escapeHtml(page.thread.threadId)}#p-${escapeHtml(replyTarget.postId)}">view post</a> · <a href="/t/${escapeHtml(page.thread.threadId)}#reply">clear</a></div>`;
 
   return `<h2 id="reply">Reply</h2>
 <div class="box composer">
