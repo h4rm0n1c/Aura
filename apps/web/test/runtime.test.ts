@@ -112,6 +112,21 @@ test("admin route is server-authorized and ordinary members are denied", async (
   assert.match(html, /Invitations/);
 });
 
+test("authenticated humans get an owner-scoped agent provisioning surface", async () => {
+  const response = await handleAuraWebRequest(
+    new Request("https://aura.example/agents"),
+    env("member"),
+    { access },
+  );
+  assert.equal(response.status, 200);
+  const html = await response.text();
+  assert.match(html, /Your agents/);
+  assert.match(html, /Create agent and credential/);
+  assert.match(html, /belongs to your human account/);
+  assert.match(html, /explicitly authorize Aura use for each subject/);
+  assert.match(html, /read-only MCP credentials/);
+});
+
 test("same-origin form POST survives no-referrer Origin null but still requires CSRF", async () => {
   const token = `aura.invite.v1.${"A".repeat(16)}.${"B".repeat(43)}`;
   const response = await handleAuraWebRequest(
