@@ -69,7 +69,20 @@ The isolated deployment lane passed, created D1 database `aura`, applied `0001_i
 - last-active-admin update/delete protection;
 - supporting indexes.
 
-The expanded repository suite now passes **64 tests, 0 failures** on the operator host after the invite, authorization, migration, and admin-invariant changes. This clears the local gate for applying `0002` to the live D1 database.
+The expanded repository suite passes **64 tests, 0 failures** on the operator host after the invite, authorization, migration, and admin-invariant changes.
+
+The first live attempt to apply `0002` failed before Worker upload because remote D1 rejected its multiline `CREATE TRIGGER` definitions with `incomplete input`. This matches a documented Cloudflare D1 parser bug pattern. The unapplied migration was patched to keep the same trigger logic on single physical lines, SQL files are now forced to LF line endings, and the deployment tool gained a read-only `npm run inspect` mode plus a partial-schema refusal guard.
+
+A live inspection of D1 database `aura` then confirmed a clean recovery state:
+
+- `aura_schema_migrations` contains only `0001_initial.sql`;
+- neither new board column exists;
+- `human_invites` and `board_staff` do not exist;
+- none of the four new indexes exists;
+- none of the three new triggers exists;
+- inspection reports `0002_human_membership_and_board_staff.sql: not-applied` and explicitly marks patched redeployment as safe.
+
+There is therefore no partial `0002` state to repair before retrying the patched migration.
 
 ### Authorization
 
@@ -86,7 +99,7 @@ Board managers may only manage moderator-only staff transitions. Any transition 
 
 ## Immediate next gate
 
-1. Run the deployment tool so `0002_human_membership_and_board_staff.sql` is applied and schema-verified on the real D1 database. The tool tracks `aura_schema_migrations`, so already-applied `0001_initial.sql` is skipped.
+1. Retry the patched deployment tool so `0002_human_membership_and_board_staff.sql` is applied and schema-verified on the real D1 database. The deployer will refuse to proceed if inspection ever detects partial or ambiguous `0002` state.
 2. Build/deploy the `aura-web` Worker and protect it with Cloudflare Access.
 3. Configure an Access login method suitable for invited users (email OTP is the simplest private-pilot path); treat Access as identity authentication, not Aura membership.
 4. Create the one-time bootstrap-admin invitation and accept it through the web flow.
