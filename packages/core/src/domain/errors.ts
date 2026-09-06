@@ -6,6 +6,7 @@ export const DOMAIN_ERROR_CODES = [
   "rate_limited",
   "conflict",
   "thread_locked",
+  "thread_archived",
   "idempotency_conflict",
   "internal_error",
 ] as const;
