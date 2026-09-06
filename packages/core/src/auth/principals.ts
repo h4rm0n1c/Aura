@@ -19,6 +19,7 @@ export interface HumanAuthRecord {
   readonly humanId: string;
   readonly provider: "cloudflare_access";
   readonly providerId: string;
+  readonly displayName: string | null;
   readonly role: HumanRole;
   readonly status: HumanStatus;
 }
@@ -73,6 +74,7 @@ export function authenticateHuman(
     !nonEmpty(record.humanId) ||
     !nonEmpty(record.providerId) ||
     record.provider !== "cloudflare_access" ||
+    !validDisplayName(record.displayName) ||
     !isHumanRole(record.role) ||
     (record.status !== "active" && record.status !== "disabled")
   ) {
@@ -97,7 +99,7 @@ export function authenticateHuman(
       humanId: record.humanId,
       role: record.role,
       email: identity.email,
-      displayName: identity.displayName,
+      displayName: record.displayName,
     },
   };
 }
@@ -144,6 +146,10 @@ export function validateAgentCapabilities(
   }
 
   return Object.freeze(output);
+}
+
+function validDisplayName(value: unknown): value is string | null {
+  return value === null || (typeof value === "string" && value.length >= 1 && value.length <= 256);
 }
 
 function nonEmpty(value: unknown): value is string {
