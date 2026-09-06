@@ -34,14 +34,15 @@ body > header, .board-strip, main, body > footer { font-size: 16px; line-height:
 :root {
   color-scheme: dark;
   --bg: #000;
-  --panel: #050505;
-  --panel-soft: #0b0b0b;
+  --panel: #151515;
+  --panel-soft: #1e1e1e;
+  --field: #101010;
   --text: #fff;
   --muted: #c8c8c8;
-  --line: #484848;
-  --line-strong: #707070;
+  --line: #626262;
+  --line-strong: #8a8a8a;
   --link: #82c8ff;
-  --accent: #131706;
+  --accent: #1c2407;
   --accent-line: #dffb48;
   --danger: #ff9292;
   --action-bg: #fff;
@@ -64,7 +65,7 @@ nav { display: flex; gap: .8rem; flex-wrap: wrap; }
 nav a { text-decoration: none; border-bottom: 1px solid transparent; }
 nav a:hover { border-bottom-color: var(--line-strong); }
 .identity { margin-left: auto; color: var(--muted); font-size: .95rem; }
-.board-strip { display: block; border-bottom: 1px solid var(--line); background: var(--panel-soft); }
+.board-strip { display: block; border-bottom: 1px solid var(--line); background: #0a0a0a; }
 .board-strip-inner { max-width: var(--shell-width); margin: 0 auto; padding: .3rem .8rem .32rem; overflow-x: auto; font-size: .95rem; scrollbar-width: thin; }
 .board-strip-label { display: inline-block; color: var(--muted); margin-right: .6rem; }
 .board-strip a { border-bottom: 0; font-weight: 400; }
@@ -75,7 +76,7 @@ main { max-width: var(--shell-width); margin: 0 auto; padding: .9rem .8rem; }
 h1 { font-size: 1.5rem; font-weight: 700; line-height: 1.25; margin: .2rem 0 .8rem; }
 h2 { font-size: 1.18rem; font-weight: 700; line-height: 1.3; margin: 1.15rem 0 .48rem; }
 p { margin: .48rem 0; }
-.box { border: 1px solid var(--line); background: var(--panel); padding: .72rem .82rem; margin: .7rem 0; }
+.box { border: 1px solid var(--line-strong); background: var(--panel); padding: .72rem .82rem; margin: .7rem 0; }
 .notice { background: var(--accent); }
 .error { border-color: var(--danger); }
 dl { display: grid; grid-template-columns: max-content 1fr; gap: .35rem .85rem; margin: .55rem 0; }
@@ -84,26 +85,26 @@ dd { margin: 0; }
 form { margin: .75rem 0; }
 label { display: block; font-weight: 600; margin-bottom: .25rem; }
 input, textarea, select, button { font: inherit; }
-input[type="text"], input[type="email"], input[type="number"], textarea, select { border: 1px solid var(--line-strong); background: #000; color: var(--text); padding: .48rem .54rem; }
+input[type="text"], input[type="email"], input[type="number"], textarea, select { border: 1px solid var(--line-strong); background: var(--field); color: var(--text); padding: .48rem .54rem; }
 input[type="text"], input[type="email"], textarea { width: min(100%, 42rem); }
-button { border: 1px solid var(--line-strong); background: #090909; color: var(--text); padding: .42rem .72rem; cursor: pointer; }
+button { border: 1px solid var(--line-strong); background: var(--panel-soft); color: var(--text); padding: .42rem .72rem; cursor: pointer; }
 button:hover { border-color: var(--text); }
 .meta { color: var(--muted); font-size: .95rem; }
 ul.compact { margin: .45rem 0 .45rem 1.3rem; padding: 0; }
 code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
-.secret { display: block; white-space: pre-wrap; overflow-wrap: anywhere; border: 1px solid var(--line); background: #000; padding: .7rem; margin: .65rem 0; }
+.secret { display: block; white-space: pre-wrap; overflow-wrap: anywhere; border: 1px solid var(--line-strong); background: var(--field); padding: .7rem; margin: .65rem 0; }
 .inline { display: inline; margin-right: .5rem; }
-.table-wrap { overflow-x: auto; border: 1px solid var(--line); background: var(--panel); margin: .7rem 0; }
+.table-wrap { overflow-x: auto; border: 1px solid var(--line-strong); background: var(--panel); margin: .7rem 0; }
 table { width: 100%; border-collapse: collapse; font-size: 1rem; }
 th, td { border-bottom: 1px solid var(--line); padding: .48rem .58rem; text-align: left; vertical-align: top; }
-th { white-space: nowrap; background: #000; color: var(--muted); font-size: .94rem; font-weight: 600; }
+th { white-space: nowrap; background: var(--panel-soft); color: var(--muted); font-size: .94rem; font-weight: 600; }
 tr:last-child td { border-bottom: 0; }
 td form.inline { display: inline-flex; gap: .4rem; align-items: center; margin: .12rem .45rem .12rem 0; }
 .forum-heading { display: flex; justify-content: space-between; gap: 1rem; align-items: flex-start; flex-wrap: wrap; border-bottom: 1px solid var(--line); padding-bottom: .62rem; margin-bottom: .65rem; }
 .forum-heading h1 { margin-bottom: .2rem; }
 .forum-heading p { max-width: 64rem; }
 .forum-actions { display: flex; gap: .45rem; align-items: center; flex-wrap: wrap; margin-top: .1rem; }
-.forum-action { display: inline-block; border: 1px solid var(--line-strong); background: #080808; padding: .3rem .56rem; color: var(--text); font-size: .95rem; font-weight: 600; text-decoration: none; }
+.forum-action { display: inline-block; border: 1px solid var(--line-strong); background: var(--panel-soft); padding: .3rem .56rem; color: var(--text); font-size: .95rem; font-weight: 600; text-decoration: none; }
 .forum-action:hover { border-color: var(--text); color: var(--text); }
 .forum-action-primary { border-color: var(--action-bg); background: var(--action-bg); color: var(--action-text); }
 .forum-action-primary:hover { color: var(--action-text); filter: brightness(.9); }
@@ -154,7 +155,7 @@ td form.inline { display: inline-flex; gap: .4rem; align-items: center; margin: 
 .composer input[type="text"], .composer textarea { width: 100%; max-width: 58rem; }
 .composer textarea { resize: vertical; line-height: 1.5; }
 .composer button[type="submit"] { border-color: var(--action-bg); background: var(--action-bg); color: var(--action-text); font-weight: 600; }
-.reply-target { border: 1px solid var(--accent-line); padding: .48rem .58rem; margin-bottom: .65rem; font-size: .98rem; }
+.reply-target { border: 1px solid var(--accent-line); background: var(--panel); padding: .48rem .58rem; margin-bottom: .65rem; font-size: .98rem; }
 body > footer { max-width: var(--shell-width); margin: 1rem auto; padding: 0 .8rem 1rem; color: var(--muted); font-size: .95rem; }
 @media (max-width: 640px) {
   html { font-size: 125%; }
