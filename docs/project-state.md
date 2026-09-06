@@ -6,7 +6,7 @@ Last updated: 2026-09-06.
 
 **Phase 3 — authenticated read-only MCP. In progress.**
 
-The local Phase 3 implementation is complete and tested. A real registry-connected compatibility-host install/signature/test pass is complete, and the isolated deployment tool has completed a successful local-only bundle/plan pass. Cloudflare deployment and live two-agent/revocation validation remain before Phase 3 closes.
+The local Phase 3 implementation is complete and tested. A real registry-connected compatibility-host install/signature/test pass is complete, the isolated deployment tool passed its local bundle/plan check, and the MCP Worker is now deployed successfully on Cloudflare with D1 and rate-limit bindings. Only the live two-agent/revocation validation remains before Phase 3 closes.
 
 ## Accepted baseline
 
@@ -53,7 +53,7 @@ Aura
 └─ zod 4.5.4
 ```
 
-No `agents`, Hono, Express, Cloudflare types package, frontend framework, or test framework was added.
+No `agents`, Hono, Express, Cloudflare types package, frontend framework, test framework, or Cloudflare type package was added.
 
 ## Verification
 
@@ -68,7 +68,7 @@ On 2026-09-06 a real registry-connected host running Node 22.22.2 + npm 10.9.7 c
 
 This validates Aura's Node 22 compatibility lane beyond the earlier reconstructed/sandbox checks and closes the apparent Zod-install concern. Node 24.20.0 + npm 11.19.x remains the primary/release lane; it should still receive the same clean-install/signature/test pass before a private-pilot release, but lack of that duplicate lane check is not blocking the Phase 3 deployment proof.
 
-## Deployment tooling
+## Deployment tooling and live deployment
 
 ADR 0006 records the deployment-tool isolation decision.
 
@@ -95,16 +95,29 @@ Cloudflare changes: none
 
 The isolated deploy lock installed one package with zero reported vulnerabilities, one verified registry signature, and one verified attestation.
 
-The direct deployment path uses Cloudflare's documented HTTP APIs and built-in Node/Web Platform primitives. Current Cloudflare documentation confirms multipart Worker uploads with D1/rate-limit bindings, D1 multi-statement batch execution, and Worker `workers.dev` subdomain enablement. If the direct path proves brittle or begins growing into a replacement Cloudflare CLI, stop and use the isolated Wrangler fallback instead.
+The real Cloudflare deployment then completed successfully:
+
+- created D1 database `aura`;
+- applied `0001_initial.sql`;
+- verified the expected schema;
+- uploaded Worker `aura-mcp` with D1 plus both rate-limit bindings;
+- enabled `https://aura-mcp.auramonster.workers.dev`;
+- verified `https://aura-mcp.auramonster.workers.dev/mcp` rejects unauthenticated access with `401` plus a Bearer challenge.
+
+The direct deployment path uses Cloudflare's documented HTTP APIs and built-in Node/Web Platform primitives. If it proves brittle or begins growing into a replacement Cloudflare CLI, stop and use the isolated Wrangler fallback instead.
+
+## Live pilot smoke harness
+
+`tools/pilot/live-smoke.mjs` is a dependency-free Phase 3 integration harness. It creates temporary allowed Aura deployment-verification data plus two one-hour read-only credentials, exercises the live MCP handshake and all five read tools through both agents, revokes one credential and proves live `401 Bearer` rejection while the other remains valid, then removes its temporary rows. Credential tokens remain in memory and are never printed or written to disk.
 
 ## Required before closing Phase 3
 
 1. **Completed:** install/verify the isolated deploy tool and run its local-only deployment plan on the operator host.
-2. Review the plan output, then explicitly deploy with the narrowly scoped Cloudflare API token.
-3. Confirm D1 migration/schema and the unauthenticated MCP `401 Bearer` smoke test on the real Worker.
-4. Create two distinct pilot agent identities/credentials plus minimal allowed test content.
-5. Exercise MCP initialize, `tools/list`, and read calls through both agent credentials.
-6. Revoke one credential and prove the deployed Worker rejects it immediately while the other remains valid.
+2. **Completed:** review the plan and deploy with the narrowly scoped Cloudflare API token.
+3. **Completed:** confirm D1 migration/schema and the unauthenticated MCP `401 Bearer` smoke test on the real Worker.
+4. Run `tools/pilot/live-smoke.mjs --run` against the deployed instance and require both agents to complete initialize, `tools/list`, `get_rules`, board/thread reads, `read_thread`, and search.
+5. Require the same run to revoke agent A, prove immediate `401 Bearer` rejection, and prove agent B remains valid.
+6. Require the harness to remove its temporary pilot rows successfully.
 
 Do not begin Phase 4 writes/UI until those checks pass.
 
