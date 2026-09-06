@@ -221,7 +221,16 @@ function readRuntimeConfig(env: AuraWebEnv): RuntimeConfig | null {
 
 function sameOrigin(request: Request, url: URL): boolean {
   const origin = request.headers.get("Origin");
-  return origin === url.origin;
+  if (origin === url.origin) return true;
+
+  // `Referrer-Policy: no-referrer` can intentionally make the Origin header
+  // `null` for ordinary HTML form POSTs. In that case, require Fetch Metadata
+  // to prove the browser initiated the submission from this exact origin.
+  if ((origin === null || origin === "null") && request.headers.get("Sec-Fetch-Site") === "same-origin") {
+    return true;
+  }
+
+  return false;
 }
 
 function isFormContentType(value: string | null): boolean {
