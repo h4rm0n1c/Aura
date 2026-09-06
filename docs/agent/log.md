@@ -2,129 +2,67 @@
 
 Short chronological notes for non-trivial repository changes.
 
-## 2026-09-05 — initial repository bootstrap
+## 2026-09-05 — repository and security baseline
 
 - Established the Aura charter, repository skeleton, agent harness, architecture/security docs, roadmap, and initial ADRs.
+- Defined separate human/agent identity planes, server-rendered human UI, capability-bounded MCP, CSRF, typed IDs, trust/provenance, and authorization contracts.
+- Added strict dependency-minimal npm/TypeScript policy with exact pins, lockfiles, disabled lifecycle scripts, and dependency review.
+- Added D1 schema for humans, agents, verifier-only credentials/capabilities, boards, threads/posts, idempotency, and audit storage.
+- Made subject-specific human authorization a hard agent participation rule: a credential grants capability, not standing consent.
+- Added global participation rules: roleplay, adult/sexual content, and security research are forbidden; board content is untrusted third-party content.
 
-## 2026-09-05 — JavaScript supply-chain baseline
+## 2026-09-05 — Phase 3 read-only MCP
 
-- Added dependency-minimal npm/TypeScript rules, exact pins/lockfile policy, disabled lifecycle scripts, dependency review, and pinned-CI expectations.
+- Implemented authenticated D1-backed MCP using `@modelcontextprotocol/server` directly.
+- Added `get_rules`, `list_boards`, `list_threads`, `read_thread`, and `search`.
+- Added strict Host/Origin policy, JSON-only POSTs, rate limits, credential expiry, safe errors, body limits, hidden-post exclusion, and untrusted-content envelopes.
+- Reconstructed and passed the initial 49-test suite.
 
-## 2026-09-05 — authentication and web UI baseline
+## 2026-09-06 — deployment tooling and live Phase 3 proof
 
-- Defined separate human/agent identity planes, Access-backed human auth, per-agent credentials, CSRF requirements, OAuth-compatible principals, and a server-rendered minimal-JavaScript UI.
+- Isolated deployment tooling in `tools/deploy/` with exact-pinned `esbuild-wasm@0.28.2` and direct Cloudflare API deployment.
+- Created D1 database `aura`, applied `0001_initial.sql`, deployed `aura-mcp`, and verified unauthenticated `401 Bearer` behavior.
+- Ran the live two-agent smoke harness: both agents completed initialize, tools/list, all read tools, and rules retrieval; revoking one credential immediately produced `401 Bearer` while the second remained valid; temporary rows were cleaned up.
+- Closed Phase 3 and opened Phase 4.
 
-## 2026-09-05 — Phase 1 contracts complete
+## 2026-09-06 — human membership and permission foundation
 
-- Implemented principals/auth, credential verification, CSRF, typed IDs, trust/provenance, authorization, exact MCP schemas/limits, hostile-content fixtures, and local tests.
-
-## 2026-09-05 — Phase 2 storage foundation complete
-
-- Added initial D1 schema, identity ownership, verifier-only credentials/capabilities, relational content, idempotency, audit storage, indexes, and stored identity lifecycle tests.
-
-## 2026-09-05 — Phase 3 read-only MCP implemented locally
-
-- Chose `@modelcontextprotocol/server` directly instead of Cloudflare `agents`; runtime lock graph is three packages including transitive MCP core.
-- Added D1 credential/read adapters, opaque cursors, five read-only MCP tools, and untrusted envelopes for titles as well as post bodies.
-- Added strict Host/Origin policy, JSON POST enforcement, Cloudflare rate-limit hooks, credential expiry enforcement, and a 64 KiB MCP request-body ceiling.
-- Reconstructed and ran the full repository suite: 49 passed, 0 failed.
-- Kept Phase 3 open because real package installation/signature verification, deployment, two-agent smoke tests, and live revocation were still pending.
-- Added Node 22.16.0 + npm 10.9.x as a supported compatibility lane; `npm test` selects Node's built-in strip-types flag only where Node 22.16 requires it.
-
-## 2026-09-05 — deployment tooling supply-chain review
-
-- Confirmed the apparent Zod install problem was a sandbox registry/DNS limitation, not evidence of a bad `zod@4.5.4` lock entry.
-- Reviewed Wrangler `4.129.0`, its direct dependency surface, lifecycle-script requirements, and Cloudflare's own package-age/build-script controls.
-- Kept Wrangler out of Aura's root application lockfile.
-- Accepted ADR 0006: first prove a small direct Cloudflare API deployment path; keep exact-pinned isolated Wrangler as the fallback if needed.
-
-## 2026-09-05 — operator consent and board governance
-
-- Made subject-specific human authorization a hard agent participation rule: credentials grant capability, not standing consent.
-- One explicit authorization can cover reasonable follow-up within the same subject/thread; materially changing subject requires fresh human permission.
-- Added the consent rule to MCP `get_rules` so agents see it at the protocol boundary.
-- Made board taxonomy explicitly instance/community-owned; Aura does not prescribe a canonical global board list.
-
-## 2026-09-05 — global participation rules promoted
-
-- Added `docs/rules.md` as the canonical instance-global rules baseline for humans and agents.
-- Forbid roleplay, adult/sexual content, and security research on Aura; relabelling or fictional framing does not bypass the restriction.
-- Violations may result in temporary or permanent suspension, with relevant records reviewed to verify that a suspension decision was justified.
-- Required the future human UI to make core rules plainly visible rather than bury them in fine print.
-- Added the forbidden-subject and suspension rules to MCP `get_rules` and promoted the rules from the root README/docs index.
-
-## 2026-09-06 — real install verification and direct deploy tooling
-
-- Verified the application lock on a real registry-connected host running Node 22.22.2 + npm 10.9.7: clean `npm ci --ignore-scripts`, zero reported vulnerabilities, 3 verified registry signatures, 3 verified attestations, and 49/49 tests passing.
-- Closed the earlier Zod/cache uncertainty as an environment artefact rather than a dependency defect.
-- Added `tools/deploy/` as an isolated deployment trust boundary with exact-pinned `esbuild-wasm@0.28.2`, a separate lockfile, and lifecycle scripts disabled.
-- Added a local-only deployment plan that bundles and validates configuration without requiring the Cloudflare API token or making Cloudflare changes.
-- Added an explicit direct Cloudflare deploy path for D1 creation/migrations, schema verification, Worker upload with D1/rate-limit bindings, `workers.dev` enablement, and an unauthenticated `401 Bearer` smoke test.
-- Kept Node 24.20/npm 11.19 as the primary release lane; its duplicate clean-install/signature/test pass remains a pre-pilot release check rather than a blocker for the Phase 3 deployment proof.
-
-## 2026-09-06 — deployment plan passed
-
-- Installed the isolated deploy lock on the operator host with one package, zero reported vulnerabilities, one verified registry signature, and one verified attestation.
-- `npm run plan` successfully bundled the real MCP Worker to 651,803 bytes using `esbuild-wasm@0.28.2`.
-- Plan resolved `aura-mcp.auramonster.workers.dev`, D1 database `aura`, rate-limit namespace IDs `1001`/`1002`, and migration `0001_initial.sql` without making any Cloudflare changes.
-- Rechecked current Cloudflare API documentation for multipart Worker upload bindings, D1 batched statements, and `workers.dev` subdomain enablement before advancing to the first real deployment.
-
-## 2026-09-06 — real Cloudflare deployment passed
-
-- Created the real D1 database `aura` and applied `0001_initial.sql` successfully.
-- Verified the deployed D1 schema before upload.
-- Uploaded Worker `aura-mcp` with the D1 binding and both rate-limit bindings, then enabled its `workers.dev` route.
-- Confirmed `https://aura-mcp.auramonster.workers.dev/mcp` rejects unauthenticated access with the expected `401 Bearer` challenge.
-- Added dependency-free `tools/pilot/live-smoke.mjs` for the final Phase 3 proof: temporary two-agent read exercise, live revocation, unaffected second credential, and automatic cleanup with one-hour credential expiry as a fail-safe.
-
-## 2026-09-06 — Phase 3 complete; Phase 4 begins
-
-- Ran the live smoke harness successfully against the deployed Cloudflare instance.
-- Both temporary agents completed initialize, `tools/list`, `get_rules`, `list_boards`, `list_threads`, `read_thread`, and `search` through the real MCP Worker.
-- Revoked agent A and confirmed immediate live `401 Bearer` rejection while agent B remained valid.
-- Confirmed temporary pilot rows were removed after the test.
-- Closed Phase 3 and advanced Aura to Phase 4: server-rendered human board UI and shared human/agent write paths.
-
-## 2026-09-06 — Phase 4 human membership and permission foundation
-
-- Accepted ADR 0007: Cloudflare Access authenticates human identity while Aura owns invite-only membership, site roles, board roles, and application authorization.
-- Added verifier-only `aura.invite.v1` human invitation tokens and normalized email binding.
-- Added migration `0002_human_membership_and_board_staff.sql` for invitations, board staff, board lifecycle metadata, one-time empty-instance bootstrap-admin protection, and last-active-admin protection.
-- Added site-vs-board authorization contracts: site moderators, site admins, board moderators, and board managers remain distinct; board managers cannot touch manager-level authority.
-- Added web D1 human/board-role lookups and transactional member invite creation/revocation/acceptance with audit events.
-- Made human display name Aura-owned profile state while verified email/login identity remains Access-owned.
-- Added expanded authorization, migration, admin-invariant, and invite-integration tests.
-- Operator-host verification passed with **64 tests, 64 passed, 0 failed**, clearing the local gate for live D1 migration `0002`.
+- Accepted ADR 0007: Cloudflare Access authenticates browser identity while Aura owns invite-only membership, site roles, board-local roles, and application authorization.
+- Added verifier-only human invitation tokens and email-bound invite acceptance.
+- Added migration `0002_human_membership_and_board_staff.sql` for human invites, board staff, board lifecycle metadata, bootstrap-admin protection, and last-active-admin protection.
+- Added site-vs-board authorization contracts and SQLite-backed admin/invite tests.
+- Operator-host suite reached 64/64 before live migration.
 
 ## 2026-09-06 — D1 trigger parser recovery
 
-- The first live `0002` deployment failed before Worker upload with remote D1 `incomplete input` while parsing multiline `CREATE TRIGGER` statements.
-- Matched the failure to Cloudflare's known remote-D1 multiline-trigger parser behavior and kept all three safety triggers intact while converting their definitions to single physical lines.
-- Added `.gitattributes` to force LF line endings for SQL files.
-- Added read-only `npm run inspect` plus deployment refusal on partial/ambiguous `0002` schema state.
-- Live inspection confirmed D1 remains cleanly at `0001_initial.sql`: no `0002` marker, columns, tables, indexes, or triggers exist.
-- Patched redeployment is therefore safe without manual cleanup.
-
-## 2026-09-06 — D1 import transport and live membership schema
-
-- Replaced trigger-bearing migration transport over D1 `/query` with Cloudflare's SQL import API: init, signed upload, ingest, poll, and migration-marker verification.
-- Applied `0002_human_membership_and_board_staff.sql` successfully to the real `aura` D1 database with no manual repair.
-- Re-verified the full D1 schema and re-uploaded `aura-mcp`; unauthenticated MCP still failed closed with `401 Bearer`.
+- Remote D1 `/query` repeatedly rejected trigger-bearing migration `0002` with `incomplete input`.
+- Kept the safety triggers intact and moved migration transport to Cloudflare's D1 SQL import API: init, signed upload, ingest, poll, marker verification.
+- Applied `0002` successfully to the real D1 database with no manual repair; schema verification passed and `aura-mcp` remained healthy.
 
 ## 2026-09-06 — live human web bootstrap
 
-- Added the dependency-free `aura-web` Worker with server-rendered `/`, `/rules`, `/invite/<token>`, `/account`, `/admin`, and local CSS.
-- Deployed the Worker first in setup-incomplete mode, attached Cloudflare Access for all traffic, then configured the Access AUD and Worker-secret CSRF key.
-- Created and accepted the one-time email-bound bootstrap-admin invitation through the live Access-authenticated web flow.
-- Confirmed the resulting human account is active with site role `admin` and can open `/admin`.
-- Fixed the browser `Origin: null` edge case caused by `Referrer-Policy: no-referrer` by requiring `Sec-Fetch-Site: same-origin` when Origin is absent/null; HMAC CSRF remains mandatory.
+- Added and deployed dependency-free `aura-web` with `/`, `/rules`, `/invite/<token>`, `/account`, `/admin`, and local CSS.
+- Put the Worker behind Cloudflare Access for all traffic and configured the application AUD plus Worker-secret CSRF key.
+- Created and accepted the one-time bootstrap-admin invitation through the live Access-authenticated flow.
+- Confirmed the first human is active with site role `admin` and `/admin` access.
+- Fixed legitimate `Origin: null` HTML form submissions caused by `Referrer-Policy: no-referrer`: Aura now requires `Sec-Fetch-Site: same-origin` for absent/null Origin and still requires HMAC CSRF.
 
-## 2026-09-06 — human-owned agent identity baseline
+## 2026-09-06 — human-owned agent identity and provisioning
 
-- Accepted ADR 0008: every Aura agent belongs to exactly one human owner; agents do not self-register and human site/board roles do not flow into agent capability.
-- Split owner-only agent provisioning from owner/admin operational control in core authorization.
-- Extended the MCP credential record/principal with `ownerHumanId`; D1 credential lookup now joins the owning human and authentication rejects disabled owners.
-- Added `/agents` and account navigation for owner-scoped agent creation, one-time credential display, rotation, revocation, and agent disable/re-enable.
-- Initial human-created credentials deliberately receive only the existing `read` capability; write capabilities remain gated on the future write-capable MCP slice.
-- Added SQLite-backed agent lifecycle tests, inactive-owner MCP tests, and a runtime test for the authenticated `/agents` surface.
-- These latest agent changes still require an operator-host `npm test` pass and live redeployment before they are considered verified.
+- Accepted ADR 0008: every Aura agent belongs to exactly one human owner; agents do not self-register; human site/board authority does not flow into agent capability.
+- Split owner-only provisioning from owner/admin operational control.
+- Extended MCP credential/principal state with `ownerHumanId`; credential lookup now joins the owning human and rejects inactive owners.
+- Added `/agents` for owner-scoped agent creation, one-time read credential display, rotation, revocation, and agent disable/re-enable.
+- Initial human-created credentials deliberately receive only `read` until write-capable MCP exists.
+- Added SQLite-backed ownership/lifecycle tests, inactive-owner MCP tests, and authenticated `/agents` runtime coverage.
+- Fixed one stale stored-state test fixture after the first operator run exposed that it still constructed the pre-owner credential record shape.
+- Current operator-host suite passes **73 tests, 73 passed, 0 failed**.
+
+## 2026-09-06 — live human-owned agent proof
+
+- Redeployed the current MCP and web code with no new D1 migration required.
+- Created a real agent through `/agents` under the first human administrator account.
+- Verified its one-time credential against the live MCP Worker: initialize, tools/list, `get_rules`, and `list_boards` succeeded.
+- Rotated the credential through the human web UI and confirmed the old token immediately returned `401 Bearer`.
+- Loaded the replacement token and confirmed live MCP authentication/read access succeeded again.
+- This closes the first-human -> owned-agent -> verifier-only credential -> live MCP -> owner rotation/revocation path.
