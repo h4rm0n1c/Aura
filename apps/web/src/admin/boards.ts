@@ -24,6 +24,7 @@ export interface BoardAdminSummary {
   readonly description: string;
   readonly status: BoardStatus;
   readonly sortOrder: number;
+  readonly maxThreads: number;
   readonly createdAt: number;
   readonly staffCount: number;
   readonly moderatorCount: number;
@@ -58,6 +59,7 @@ interface BoardRow {
   readonly description: unknown;
   readonly status: unknown;
   readonly sort_order: unknown;
+  readonly max_threads: unknown;
   readonly created_at: unknown;
   readonly staff_count?: unknown;
   readonly moderator_count?: unknown;
@@ -79,6 +81,7 @@ interface StaffStateRow {
 }
 
 const BOARD_SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const DEFAULT_MAX_THREADS = 100;
 
 export async function listBoardsForAdmin(
   db: D1DatabaseLike,
@@ -91,7 +94,7 @@ export async function listBoardsForAdmin(
   try {
     const result = await db.prepare(`
       SELECT
-        b.id, b.slug, b.title, b.description, b.status, b.sort_order, b.created_at,
+        b.id, b.slug, b.title, b.description, b.status, b.sort_order, b.max_threads, b.created_at,
         (SELECT COUNT(*) FROM board_staff s WHERE s.board_id = b.id) AS staff_count,
         (SELECT COUNT(*) FROM board_staff s WHERE s.board_id = b.id AND s.role = 'moderator') AS moderator_count,
         (SELECT COUNT(*) FROM board_staff s WHERE s.board_id = b.id AND s.role = 'manager') AS manager_count
@@ -115,7 +118,12 @@ export async function listBoardsForAdmin(
 export async function createBoard(
   db: D1DatabaseLike,
   principal: HumanPrincipal,
-  input: { readonly slug: unknown; readonly title: unknown; readonly description: unknown },
+  input: {
+    readonly slug: unknown;
+    readonly title: unknown;
+    readonly description: unknown;
+    readonly maxThreads?: unknown;
+  },
   nowSeconds: number,
 ): Promise<BoardAdminResult<{ readonly boardId: string; readonly slug: string }>> {
   const authorized = authorizeBoardLifecycle(principal);
@@ -124,7 +132,14 @@ export async function createBoard(
   const slug = normalizeSlug(input.slug);
   const title = normalizeTitle(input.title);
   const description = normalizeDescription(input.description);
-  if (slug === null || title === null || description === null || !validTimestamp(nowSeconds)) {
+  const maxThreads = input.maxThreads === undefined ? DEFAULT_MAX_THREADS : normalizeMaxThreads(input.maxThreads);
+  if (
+    slug === null ||
+    title === null ||
+    description === null ||
+    maxThreads === null ||
+    !validTimestamp(nowSeconds)
+  ) {
     return fail("validation_error");
   }
 
@@ -132,15 +147,16 @@ export async function createBoard(
   try {
     const results = await db.batch([
       db.prepare(`
-        INSERT INTO boards (id, slug, title, description, status, sort_order, created_at)
-        SELECT ?1, ?2, ?3, ?4, 'active', COALESCE(MAX(sort_order), -10) + 10, ?5
+        INSERT INTO boards (id, slug, title, description, status, sort_order, max_threads, created_at)
+        SELECT ?1, ?2, ?3, ?4, 'active', COALESCE(MAX(sort_order), -10) + 10, ?5, ?6
         FROM boards
-      `).bind(boardId, slug, title, description, nowSeconds),
+      `).bind(boardId, slug, title, description, maxThreads, nowSeconds),
       db.prepare(`
         INSERT INTO audit_events
           (occurred_at, actor_kind, actor_human_id, action, target_kind, target_id, metadata_json)
-        VALUES (?1, 'human', ?2, 'board_created', 'board', ?3, json_object('slug', ?4))
-      `).bind(nowSeconds, principal.humanId, boardId, slug),
+        VALUES (?1, 'human', ?2, 'board_created', 'board', ?3,
+                json_object('slug', ?4, 'max_threads', ?5))
+      `).bind(nowSeconds, principal.humanId, boardId, slug, maxThreads),
     ]);
     if (resultChanges(results[0]) !== 1 || resultChanges(results[1]) !== 1) return fail("conflict");
   } catch {
@@ -161,7 +177,7 @@ export async function getBoardForManagement(
   try {
     row = await db.prepare(`
       SELECT
-        b.id, b.slug, b.title, b.description, b.status, b.sort_order, b.created_at,
+        b.id, b.slug, b.title, b.description, b.status, b.sort_order, b.max_threads, b.created_at,
         (SELECT COUNT(*) FROM board_staff s WHERE s.board_id = b.id) AS staff_count,
         (SELECT COUNT(*) FROM board_staff s WHERE s.board_id = b.id AND s.role = 'moderator') AS moderator_count,
         (SELECT COUNT(*) FROM board_staff s WHERE s.board_id = b.id AND s.role = 'manager') AS manager_count,
@@ -186,18 +202,19 @@ export async function updateBoardMetadata(
   db: D1DatabaseLike,
   principal: HumanPrincipal,
   boardId: string,
-  input: { readonly title: unknown; readonly description: unknown },
+  input: { readonly title: unknown; readonly description: unknown; readonly maxThreads?: unknown },
   nowSeconds: number,
 ): Promise<BoardAdminResult<{ readonly boardId: string }>> {
   if (!validTimestamp(nowSeconds)) return fail("validation_error");
   const managed = await getBoardForManagement(db, principal, boardId);
   if (!managed.ok) return managed;
 
+  const board = managed.value;
   const title = normalizeTitle(input.title);
   const description = normalizeDescription(input.description);
-  if (title === null || description === null) return fail("validation_error");
-  const board = managed.value;
-  if (title === board.title && description === board.description) {
+  const maxThreads = input.maxThreads === undefined ? board.maxThreads : normalizeMaxThreads(input.maxThreads);
+  if (title === null || description === null || maxThreads === null) return fail("validation_error");
+  if (title === board.title && description === board.description && maxThreads === board.maxThreads) {
     return { ok: true, value: Object.freeze({ boardId }) };
   }
 
@@ -205,24 +222,32 @@ export async function updateBoardMetadata(
     const results = await db.batch([
       db.prepare(`
         UPDATE boards
-        SET title = ?1, description = ?2
-        WHERE id = ?3 AND title = ?4 AND description = ?5
-      `).bind(title, description, boardId, board.title, board.description),
+        SET title = ?1, description = ?2, max_threads = ?3
+        WHERE id = ?4 AND title = ?5 AND description = ?6 AND max_threads = ?7
+      `).bind(title, description, maxThreads, boardId, board.title, board.description, board.maxThreads),
       db.prepare(`
         INSERT INTO audit_events
           (occurred_at, actor_kind, actor_human_id, action, target_kind, target_id, metadata_json)
         SELECT ?1, 'human', ?2, 'board_metadata_changed', 'board', id,
-               json_object('title_changed', ?6, 'description_changed', ?7)
+               json_object(
+                 'title_changed', ?8,
+                 'description_changed', ?9,
+                 'max_threads_from', ?10,
+                 'max_threads_to', ?3
+               )
         FROM boards
-        WHERE id = ?3 AND title = ?4 AND description = ?5
+        WHERE id = ?4 AND title = ?5 AND description = ?6 AND max_threads = ?3
       `).bind(
         nowSeconds,
         principal.humanId,
+        maxThreads,
         boardId,
         title,
         description,
+        board.maxThreads,
         title === board.title ? 0 : 1,
         description === board.description ? 0 : 1,
+        board.maxThreads,
       ),
     ]);
     if (resultChanges(results[0]) !== 1 || resultChanges(results[1]) !== 1) return fail("conflict");
@@ -424,7 +449,7 @@ async function loadBoard(db: D1DatabaseLike, boardId: string): Promise<BoardAdmi
   let row: BoardRow | null;
   try {
     row = await db.prepare(`
-      SELECT id, slug, title, description, status, sort_order, created_at,
+      SELECT id, slug, title, description, status, sort_order, max_threads, created_at,
              0 AS staff_count, 0 AS moderator_count, 0 AS manager_count
       FROM boards
       WHERE id = ?1
@@ -487,6 +512,7 @@ function parseBoard(row: BoardRow, requireCounts: boolean): BoardAdminSummary | 
     typeof row.description !== "string" || row.description.length > 1024 ||
     (row.status !== "active" && row.status !== "archived") ||
     !validSortOrder(row.sort_order) ||
+    !validMaxThreads(row.max_threads) ||
     !validTimestamp(row.created_at)
   ) {
     return null;
@@ -505,6 +531,7 @@ function parseBoard(row: BoardRow, requireCounts: boolean): BoardAdminSummary | 
     description: row.description,
     status: row.status,
     sortOrder: row.sort_order,
+    maxThreads: row.max_threads,
     createdAt: row.created_at,
     staffCount,
     moderatorCount,
@@ -556,12 +583,23 @@ function normalizeDescription(value: unknown): string | null {
   return description.length <= 1024 ? description : null;
 }
 
+function normalizeMaxThreads(value: unknown): number | null {
+  const normalized = typeof value === "string" && /^\d+$/.test(value.trim())
+    ? Number(value.trim())
+    : value;
+  return validMaxThreads(normalized) ? normalized : null;
+}
+
 function validTimestamp(value: unknown): value is number {
   return Number.isSafeInteger(value) && (value as number) >= 0;
 }
 
 function validSortOrder(value: unknown): value is number {
   return Number.isSafeInteger(value) && (value as number) >= 0 && (value as number) <= 1_000_000_000;
+}
+
+function validMaxThreads(value: unknown): value is number {
+  return Number.isSafeInteger(value) && (value as number) >= 1 && (value as number) <= 10_000;
 }
 
 function validCount(value: unknown): value is number {
