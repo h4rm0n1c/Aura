@@ -5,15 +5,34 @@ import {
   verifyCsrfToken,
 } from "../../../../packages/core/src/auth/csrf.ts";
 import { principalKey, type HumanPrincipal, type HumanRole } from "../../../../packages/core/src/auth/principals.ts";
+import type { BoardStaffRole } from "../../../../packages/core/src/domain/authorization.ts";
 import type { D1DatabaseLike } from "../db/d1.ts";
 import { createMemberInvite, createMemberLinkInvite, revokeMemberInvite } from "../membership/invites.ts";
 import { escapeHtml, htmlPage, redirectResponse, textResponse } from "../ui.ts";
+import {
+  createBoard,
+  getBoardForManagement,
+  getBoardStaffPageData,
+  listBoardsForAdmin,
+  setBoardSortOrder,
+  setBoardStaffRole,
+  setBoardStatus,
+  updateBoardMetadata,
+  type BoardAdminSummary,
+  type BoardStaffCandidate,
+} from "./boards.ts";
 import { listHumanInvitesForAdmin, type HumanInviteAdminSummary } from "./invites.ts";
 import { listHumansForAdmin, setHumanRole, setHumanStatus, type HumanAdminSummary } from "./humans.ts";
 
 const MAX_FORM_BYTES = 16 * 1024;
 const INVITE_REVOKE_PATH = /^\/admin\/invites\/([A-Za-z0-9_-]{16})\/revoke$/;
 const HUMAN_ACTION_PATH = /^\/admin\/users\/(hum_[A-Za-z0-9_-]{22})\/(role|status)$/;
+const BOARD_ID_PATTERN = "brd_[A-Za-z0-9_-]{22}";
+const HUMAN_ID_PATTERN = "hum_[A-Za-z0-9_-]{22}";
+const BOARD_PAGE_PATH = new RegExp(`^/admin/boards/(${BOARD_ID_PATTERN})$`);
+const BOARD_STAFF_PAGE_PATH = new RegExp(`^/admin/boards/(${BOARD_ID_PATTERN})/staff$`);
+const BOARD_ACTION_PATH = new RegExp(`^/admin/boards/(${BOARD_ID_PATTERN})/(metadata|status|order)$`);
+const BOARD_STAFF_ACTION_PATH = new RegExp(`^/admin/boards/(${BOARD_ID_PATTERN})/staff/(${HUMAN_ID_PATTERN})$`);
 const INVITE_TTLS = new Map<string, number>([
   ["1", 24 * 60 * 60],
   ["3", 3 * 24 * 60 * 60],
@@ -31,6 +50,53 @@ export async function handleAdminRequest(
 ): Promise<Response | null> {
   if (url.pathname !== "/admin" && !url.pathname.startsWith("/admin/")) return null;
 
+  const boardPageMatch = url.pathname.match(BOARD_PAGE_PATH);
+  const boardStaffPageMatch = url.pathname.match(BOARD_STAFF_PAGE_PATH);
+  const boardActionMatch = url.pathname.match(BOARD_ACTION_PATH);
+  const boardStaffActionMatch = url.pathname.match(BOARD_STAFF_ACTION_PATH);
+
+  // Board-specific settings are intentionally reachable by a board manager even
+  // though the rest of /admin remains site-admin-only. Service authorization is
+  // authoritative; merely knowing a board-management URL grants nothing.
+  if (
+    boardPageMatch !== null ||
+    boardStaffPageMatch !== null ||
+    boardActionMatch !== null ||
+    boardStaffActionMatch !== null
+  ) {
+    if (request.method === "GET") {
+      if (boardPageMatch !== null) return boardManagementPage(db, csrfKey, principal, boardPageMatch[1]);
+      if (boardStaffPageMatch !== null) return boardStaffPage(db, csrfKey, principal, boardStaffPageMatch[1]);
+      return methodNotAllowed("POST");
+    }
+    if (request.method === "POST") {
+      if (boardActionMatch !== null) {
+        return boardActionPost(
+          request,
+          db,
+          csrfKey,
+          principal,
+          url,
+          boardActionMatch[1],
+          boardActionMatch[2] as "metadata" | "status" | "order",
+        );
+      }
+      if (boardStaffActionMatch !== null) {
+        return boardStaffActionPost(
+          request,
+          db,
+          csrfKey,
+          principal,
+          url,
+          boardStaffActionMatch[1],
+          boardStaffActionMatch[2],
+        );
+      }
+      return methodNotAllowed("GET");
+    }
+    return methodNotAllowed(boardActionMatch !== null || boardStaffActionMatch !== null ? "POST" : "GET");
+  }
+
   if (principal.role !== "admin") {
     return htmlPage(
       "Forbidden",
@@ -43,12 +109,16 @@ export async function handleAdminRequest(
     if (url.pathname === "/admin") return adminHomePage(principal);
     if (url.pathname === "/admin/invites") return invitationsPage(db, csrfKey, principal);
     if (url.pathname === "/admin/users") return usersPage(db, csrfKey, principal);
+    if (url.pathname === "/admin/boards") return boardsPage(db, csrfKey, principal);
     return null;
   }
 
   if (request.method === "POST") {
     if (url.pathname === "/admin/invites") {
       return createInvitePost(request, db, csrfKey, principal, url);
+    }
+    if (url.pathname === "/admin/boards") {
+      return createBoardPost(request, db, csrfKey, principal, url);
     }
 
     const revokeMatch = url.pathname.match(INVITE_REVOKE_PATH);
@@ -76,6 +146,7 @@ export async function handleAdminRequest(
     url.pathname === "/admin" ||
     url.pathname === "/admin/invites" ||
     url.pathname === "/admin/users" ||
+    url.pathname === "/admin/boards" ||
     INVITE_REVOKE_PATH.test(url.pathname) ||
     HUMAN_ACTION_PATH.test(url.pathname)
   ) {
@@ -92,7 +163,7 @@ function adminHomePage(principal: HumanPrincipal): Response {
 <div class="box"><ul class="compact">
 <li><a href="/admin/invites">Invitations</a> — create one-time DM links or email-bound invitations and revoke pending invitations.</li>
 <li><a href="/admin/users">Users</a> — site roles, account status, and owned-agent counts.</li>
-<li>Boards and board staff — next implementation slice.</li>
+<li><a href="/admin/boards">Boards</a> — create, archive, order, edit, and assign board staff.</li>
 <li>Agent incident control — owners provision credentials; site admins may disable/revoke for incident response.</li>
 </ul></div>`,
     { principal },
@@ -310,6 +381,276 @@ async function humanActionPost(
   return redirectResponse("/admin/users");
 }
 
+async function boardsPage(
+  db: D1DatabaseLike,
+  csrfKey: Uint8Array,
+  principal: HumanPrincipal,
+): Promise<Response> {
+  const listed = await listBoardsForAdmin(db, principal);
+  if (!listed.ok) return adminErrorPage(listed.error.code, principal, "/admin");
+  const createCsrf = await issueAdminCsrf(csrfKey, principal, "/admin/boards");
+  const rows: string[] = [];
+  for (const board of listed.value) rows.push(await renderBoardRow(csrfKey, principal, board));
+
+  return htmlPage(
+    "Boards",
+    `<h1>Boards</h1>
+<p><a href="/admin">← Administration</a></p>
+<div class="box notice"><p>Board taxonomy is instance configuration, not an Aura built-in. Create only boards that fit the global Aura rules.</p></div>
+<h2>Create board</h2>
+<div class="box">
+<form method="post" action="/admin/boards">
+<input type="hidden" name="csrf" value="${escapeHtml(createCsrf)}">
+<p><label for="board-slug">Slug</label><input id="board-slug" type="text" name="slug" maxlength="64" pattern="[a-z0-9]+(?:-[a-z0-9]+)*" placeholder="general" required></p>
+<p><label for="board-title">Title</label><input id="board-title" type="text" name="title" maxlength="120" required></p>
+<p><label for="board-description">Description</label><textarea id="board-description" name="description" maxlength="1024" rows="4"></textarea></p>
+<button type="submit">Create board</button>
+</form>
+</div>
+<h2>Configured boards</h2>
+${rows.length === 0 ? `<div class="box"><p>No boards exist.</p></div>` : `<div class="table-wrap"><table><thead><tr><th>Board</th><th>Status</th><th>Order</th><th>Staff</th><th>Controls</th></tr></thead><tbody>${rows.join("")}</tbody></table></div>`}`,
+    { principal },
+  );
+}
+
+async function renderBoardRow(
+  csrfKey: Uint8Array,
+  principal: HumanPrincipal,
+  board: BoardAdminSummary,
+): Promise<string> {
+  const statusPath = `/admin/boards/${board.boardId}/status`;
+  const orderPath = `/admin/boards/${board.boardId}/order`;
+  const statusCsrf = await issueAdminCsrf(csrfKey, principal, statusPath);
+  const orderCsrf = await issueAdminCsrf(csrfKey, principal, orderPath);
+  const nextStatus = board.status === "active" ? "archived" : "active";
+
+  return `<tr>
+<td><strong>/${escapeHtml(board.slug)}/ — ${escapeHtml(board.title)}</strong><br><span class="meta"><code>${escapeHtml(board.boardId)}</code>${board.description ? ` · ${escapeHtml(board.description)}` : ""}</span></td>
+<td>${escapeHtml(board.status)}</td>
+<td>${board.sortOrder}</td>
+<td>${board.managerCount} manager / ${board.moderatorCount} moderator</td>
+<td>
+<a href="/admin/boards/${escapeHtml(board.boardId)}">Edit</a> · <a href="/admin/boards/${escapeHtml(board.boardId)}/staff">Staff</a>
+<form class="inline" method="post" action="${escapeHtml(statusPath)}">
+<input type="hidden" name="csrf" value="${escapeHtml(statusCsrf)}"><input type="hidden" name="status" value="${nextStatus}">
+<button type="submit">${nextStatus === "archived" ? "Archive" : "Activate"}</button>
+</form>
+<form class="inline" method="post" action="${escapeHtml(orderPath)}">
+<input type="hidden" name="csrf" value="${escapeHtml(orderCsrf)}">
+<input type="number" name="sort_order" min="0" max="1000000000" value="${board.sortOrder}" aria-label="Sort order for ${escapeHtml(board.slug)}" required>
+<button type="submit">Set order</button>
+</form>
+</td>
+</tr>`;
+}
+
+async function createBoardPost(
+  request: Request,
+  db: D1DatabaseLike,
+  csrfKey: Uint8Array,
+  principal: HumanPrincipal,
+  url: URL,
+): Promise<Response> {
+  const parsed = await readAdminForm(request, url, csrfKey, principal);
+  if (!parsed.ok) return parsed.response;
+  const result = await createBoard(
+    db,
+    principal,
+    {
+      slug: parsed.form.get("slug"),
+      title: parsed.form.get("title"),
+      description: parsed.form.get("description") ?? "",
+    },
+    Math.floor(Date.now() / 1000),
+  );
+  if (!result.ok) return adminErrorPage(result.error.code, principal, "/admin/boards");
+  return redirectResponse(`/admin/boards/${result.value.boardId}`);
+}
+
+async function boardManagementPage(
+  db: D1DatabaseLike,
+  csrfKey: Uint8Array,
+  principal: HumanPrincipal,
+  boardId: string,
+): Promise<Response> {
+  const managed = await getBoardForManagement(db, principal, boardId);
+  if (!managed.ok) return adminErrorPage(managed.error.code, principal, "/");
+  const board = managed.value;
+  const metadataPath = `/admin/boards/${board.boardId}/metadata`;
+  const metadataCsrf = await issueAdminCsrf(csrfKey, principal, metadataPath);
+  const lifecycle = principal.role === "admin"
+    ? await renderBoardLifecycleControls(csrfKey, principal, board)
+    : "";
+  const back = principal.role === "admin" ? `<a href="/admin/boards">← Boards</a>` : `<a href="/">← Boards</a>`;
+
+  return htmlPage(
+    `/${board.slug}/ settings`,
+    `<h1>/${escapeHtml(board.slug)}/ — ${escapeHtml(board.title)}</h1>
+<p>${back} · <a href="/admin/boards/${escapeHtml(board.boardId)}/staff">Board staff</a></p>
+<div class="box"><dl>
+<dt>Board ID</dt><dd><code>${escapeHtml(board.boardId)}</code></dd>
+<dt>Status</dt><dd>${escapeHtml(board.status)}</dd>
+<dt>Sort order</dt><dd>${board.sortOrder}</dd>
+<dt>Your board role</dt><dd>${escapeHtml(board.actorBoardRole ?? (principal.role === "admin" ? "site admin" : "none"))}</dd>
+</dl></div>
+<h2>Board metadata</h2>
+<div class="box">
+<p class="meta">The slug is stable after creation. Board managers may edit title and description; lifecycle controls remain site-admin-only.</p>
+<form method="post" action="${escapeHtml(metadataPath)}">
+<input type="hidden" name="csrf" value="${escapeHtml(metadataCsrf)}">
+<p><label for="board-title">Title</label><input id="board-title" type="text" name="title" maxlength="120" value="${escapeHtml(board.title)}" required></p>
+<p><label for="board-description">Description</label><textarea id="board-description" name="description" maxlength="1024" rows="6">${escapeHtml(board.description)}</textarea></p>
+<button type="submit">Save board metadata</button>
+</form>
+</div>
+${lifecycle}`,
+    { principal },
+  );
+}
+
+async function renderBoardLifecycleControls(
+  csrfKey: Uint8Array,
+  principal: HumanPrincipal,
+  board: BoardAdminSummary,
+): Promise<string> {
+  const statusPath = `/admin/boards/${board.boardId}/status`;
+  const orderPath = `/admin/boards/${board.boardId}/order`;
+  const statusCsrf = await issueAdminCsrf(csrfKey, principal, statusPath);
+  const orderCsrf = await issueAdminCsrf(csrfKey, principal, orderPath);
+  const nextStatus = board.status === "active" ? "archived" : "active";
+  return `<h2>Site-admin lifecycle controls</h2>
+<div class="box">
+<form class="inline" method="post" action="${escapeHtml(statusPath)}">
+<input type="hidden" name="csrf" value="${escapeHtml(statusCsrf)}"><input type="hidden" name="status" value="${nextStatus}">
+<button type="submit">${nextStatus === "archived" ? "Archive board" : "Activate board"}</button>
+</form>
+<form class="inline" method="post" action="${escapeHtml(orderPath)}">
+<input type="hidden" name="csrf" value="${escapeHtml(orderCsrf)}">
+<label>Sort order <input type="number" name="sort_order" min="0" max="1000000000" value="${board.sortOrder}" required></label>
+<button type="submit">Set order</button>
+</form>
+</div>`;
+}
+
+async function boardActionPost(
+  request: Request,
+  db: D1DatabaseLike,
+  csrfKey: Uint8Array,
+  principal: HumanPrincipal,
+  url: URL,
+  boardId: string,
+  action: "metadata" | "status" | "order",
+): Promise<Response> {
+  const parsed = await readAdminForm(request, url, csrfKey, principal);
+  if (!parsed.ok) return parsed.response;
+  const now = Math.floor(Date.now() / 1000);
+  const result = action === "metadata"
+    ? await updateBoardMetadata(db, principal, boardId, {
+        title: parsed.form.get("title"),
+        description: parsed.form.get("description") ?? "",
+      }, now)
+    : action === "status"
+      ? await setBoardStatus(db, principal, boardId, parsed.form.get("status"), now)
+      : await setBoardSortOrder(db, principal, boardId, parseSortOrder(parsed.form.get("sort_order")), now);
+  if (!result.ok) return adminErrorPage(result.error.code, principal, `/admin/boards/${boardId}`);
+  return redirectResponse(`/admin/boards/${boardId}`);
+}
+
+async function boardStaffPage(
+  db: D1DatabaseLike,
+  csrfKey: Uint8Array,
+  principal: HumanPrincipal,
+  boardId: string,
+): Promise<Response> {
+  const data = await getBoardStaffPageData(db, principal, boardId);
+  if (!data.ok) return adminErrorPage(data.error.code, principal, "/");
+  const board = data.value.board;
+  const rows: string[] = [];
+  for (const person of data.value.people) {
+    rows.push(await renderBoardStaffRow(csrfKey, principal, board.boardId, person));
+  }
+
+  return htmlPage(
+    `/${board.slug}/ staff`,
+    `<h1>/${escapeHtml(board.slug)}/ staff</h1>
+<p><a href="/admin/boards/${escapeHtml(board.boardId)}">← Board settings</a></p>
+<div class="box notice"><p>Board managers may add, change, or remove board moderators. Only site administrators may grant, change, or remove board-manager authority.</p></div>
+${rows.length === 0 ? `<div class="box"><p>No eligible human accounts exist.</p></div>` : `<div class="table-wrap"><table><thead><tr><th>Human</th><th>Site role</th><th>Status</th><th>Board role</th><th>Control</th></tr></thead><tbody>${rows.join("")}</tbody></table></div>`}`,
+    { principal },
+  );
+}
+
+async function renderBoardStaffRow(
+  csrfKey: Uint8Array,
+  principal: HumanPrincipal,
+  boardId: string,
+  person: BoardStaffCandidate,
+): Promise<string> {
+  const path = `/admin/boards/${boardId}/staff/${person.humanId}`;
+  let control = "—";
+  if (principal.role === "admin") {
+    const csrf = await issueAdminCsrf(csrfKey, principal, path);
+    control = boardRoleForm(path, csrf, person, [null, "moderator", "manager"]);
+  } else if (person.boardRole !== "manager" && (person.status === "active" || person.boardRole === "moderator")) {
+    const csrf = await issueAdminCsrf(csrfKey, principal, path);
+    control = boardRoleForm(path, csrf, person, [null, "moderator"]);
+  } else if (person.boardRole === "manager") {
+    control = `<span class="meta">site admin required</span>`;
+  }
+
+  return `<tr>
+<td><strong>${escapeHtml(person.displayName ?? person.humanId)}</strong><br><span class="meta"><code>${escapeHtml(person.humanId)}</code></span></td>
+<td>${escapeHtml(person.siteRole)}</td>
+<td>${escapeHtml(person.status)}</td>
+<td>${escapeHtml(person.boardRole ?? "none")}</td>
+<td>${control}</td>
+</tr>`;
+}
+
+function boardRoleForm(
+  path: string,
+  csrf: string,
+  person: BoardStaffCandidate,
+  allowed: readonly (BoardStaffRole | null)[],
+): string {
+  const options = allowed.map((role) => {
+    const value = role ?? "none";
+    const label = role ?? "none";
+    return `<option value="${value}"${role === person.boardRole ? " selected" : ""}>${label}</option>`;
+  }).join("");
+  const disabled = person.status === "disabled" && person.boardRole === null ? " disabled" : "";
+  return `<form class="inline" method="post" action="${escapeHtml(path)}">
+<input type="hidden" name="csrf" value="${escapeHtml(csrf)}">
+<select name="role" aria-label="Board role for ${escapeHtml(person.displayName ?? person.humanId)}"${disabled}>${options}</select>
+<button type="submit"${disabled}>Set role</button>
+</form>`;
+}
+
+async function boardStaffActionPost(
+  request: Request,
+  db: D1DatabaseLike,
+  csrfKey: Uint8Array,
+  principal: HumanPrincipal,
+  url: URL,
+  boardId: string,
+  humanId: string,
+): Promise<Response> {
+  const parsed = await readAdminForm(request, url, csrfKey, principal);
+  if (!parsed.ok) return parsed.response;
+  const requested = parsed.form.get("role");
+  const nextRole = requested === "none" ? null : requested;
+  const result = await setBoardStaffRole(
+    db,
+    principal,
+    boardId,
+    humanId,
+    nextRole,
+    Math.floor(Date.now() / 1000),
+  );
+  if (!result.ok) return adminErrorPage(result.error.code, principal, `/admin/boards/${boardId}/staff`);
+  return redirectResponse(`/admin/boards/${boardId}/staff`);
+}
+
 async function issueAdminCsrf(csrfKey: Uint8Array, principal: HumanPrincipal, pathname: string): Promise<string> {
   const key = await importCsrfKey(csrfKey);
   return issueCsrfToken({
@@ -359,17 +700,21 @@ function adminErrorPage(code: string, principal: HumanPrincipal, returnPath: str
   const message = code === "validation_error"
     ? "The administration request was invalid."
     : code === "forbidden"
-      ? "Site administrator authority is required."
+      ? "You do not have authority for that administration action."
       : code === "not_found"
-        ? "The requested account or invitation was not found."
+        ? "The requested Aura object was not found."
         : code === "conflict"
-          ? "Aura refused that change. The target may have changed, or the change would violate an administrator safety invariant."
+          ? "Aura refused that change. The target may have changed, or the change would violate an authorization or safety invariant."
           : "Aura could not complete the administration request.";
   return htmlPage(
     "Administration request failed",
     `<h1>Administration request failed</h1><div class="box error"><p>${escapeHtml(message)}</p></div><p><a href="${escapeHtml(returnPath)}">Return</a></p>`,
     { status, principal },
   );
+}
+
+function parseSortOrder(value: string | null): number {
+  return value !== null && /^[0-9]{1,10}$/.test(value) ? Number(value) : Number.NaN;
 }
 
 function formatTimestamp(value: number): string {
