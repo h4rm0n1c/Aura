@@ -189,11 +189,22 @@ test("locked threads reject human replies", async () => {
   db.close();
 });
 
-test("thread HTML escapes board content and shows agent provenance", async () => {
+test("thread HTML escapes board content, shows staff capcodes, links references and shows agent provenance", async () => {
   const db = new DatabaseAdapter();
-  const member = seedHuman(db, MEMBER, "member", "member", "Human User");
+  const admin = seedHuman(db, ADMIN, "admin", "admin", "Site Admin");
+  const member = seedHuman(db, MEMBER, "member", "member", "Board Mod");
   seedBoards(db);
-  const created = await createThread(db, member, "<script>alert(1)</script>", "<img src=x onerror=alert(1)>");
+  db.sqlite.prepare(`INSERT INTO board_staff
+    (board_id, human_id, role, granted_by_human_id, created_at)
+    VALUES (?, ?, 'moderator', ?, 2)`)
+    .run(BOARD, MEMBER, ADMIN);
+  const created = await createThread(db, admin, "<script>alert(1)</script>", "<img src=x onerror=alert(1)>");
+  const modReply = await createHumanReply(db, member, {
+    threadId: created.threadId,
+    body: ">>1\nBoard moderator reply",
+    parentPostId: created.postId,
+  }, 101);
+  assert.equal(modReply.ok, true);
 
   db.sqlite.prepare(`INSERT INTO agents
     (id, owner_human_id, name, model, client, status, created_at, updated_at)
@@ -202,9 +213,9 @@ test("thread HTML escapes board content and shows agent provenance", async () =>
   const agentPost = "pst_FFFFFFFFFFFFFFFFFFFFFF";
   db.sqlite.prepare(`INSERT INTO posts
     (id, thread_id, sequence, author_kind, author_agent_id, body, visibility, created_at)
-    VALUES (?, ?, 2, 'agent', ?, 'Agent answer', 'visible', 101)`)
+    VALUES (?, ?, 3, 'agent', ?, 'Agent answer', 'visible', 102)`)
     .run(agentPost, created.threadId, AGENT);
-  db.sqlite.prepare("UPDATE threads SET updated_at=101 WHERE id=?").run(created.threadId);
+  db.sqlite.prepare("UPDATE threads SET updated_at=102 WHERE id=?").run(created.threadId);
 
   const response = await handleForumRequest(
     new Request(`https://aura.example/t/${created.threadId}`),
@@ -219,10 +230,13 @@ test("thread HTML escapes board content and shows agent provenance", async () =>
   assert.doesNotMatch(html, /<script>alert\(1\)<\/script>/);
   assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
   assert.doesNotMatch(html, /<img src=x onerror=/);
+  assert.match(html, /## Admin/);
+  assert.match(html, /## Board Mod/);
   assert.match(html, /AGENT/);
   assert.match(html, /Helper Agent/);
   assert.match(html, /model Model X · client Client Y/);
-  assert.match(html, /class="post-number"[^>]*>#1<\/a>/);
+  assert.match(html, /class="post-number"[^>]*>No\.1<\/a>/);
+  assert.match(html, new RegExp(`class="post-ref" href="#p-${created.postId}">&gt;&gt;1</a>`));
   assert.doesNotMatch(html, /class="post-foot"/);
   assert.match(html, new RegExp(`reply-to/${agentPost}`));
   db.close();
@@ -246,6 +260,8 @@ test("forum HTML forms create a thread and reply with CSRF and PRG redirects", a
   const boardHtml = await boardGet.text();
   assert.match(boardHtml, /Start a thread/);
   assert.match(boardHtml, /href="#new-thread">Start thread<\/a>/);
+  assert.match(boardHtml, /class="board-strip"/);
+  assert.match(boardHtml, /href="\/b\/general"[^>]*>\/general\/<\/a>/);
   const createCsrf = /name="csrf" value="([^"]+)"/.exec(boardHtml)?.[1];
   assert(createCsrf);
 
@@ -291,7 +307,8 @@ test("forum HTML forms create a thread and reply with CSRF and PRG redirects", a
   assert(targetedGet);
   assert.equal(targetedGet.status, 200);
   const targetedHtml = await targetedGet.text();
-  assert.match(targetedHtml, /Replying to #1/);
+  assert.match(targetedHtml, /Replying to &gt;&gt;1/);
+  assert.match(targetedHtml, /<textarea id="reply-body" name="body" rows="8" required>&gt;&gt;1\n<\/textarea>/);
   assert.equal((targetedHtml.match(/name="parent_post_id"/g) ?? []).length, 1);
 
   const replyPost = await handleForumRequest(
