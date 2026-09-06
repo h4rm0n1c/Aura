@@ -6,7 +6,7 @@ Last updated: 2026-09-06.
 
 **Phase 3 — authenticated read-only MCP. In progress.**
 
-The local Phase 3 implementation is complete and tested. A real registry-connected compatibility-host install/signature/test pass is complete. Cloudflare deployment and live two-agent/revocation validation remain before Phase 3 closes.
+The local Phase 3 implementation is complete and tested. A real registry-connected compatibility-host install/signature/test pass is complete, and the isolated deployment tool has completed a successful local-only bundle/plan pass. Cloudflare deployment and live two-agent/revocation validation remain before Phase 3 closes.
 
 ## Accepted baseline
 
@@ -72,7 +72,7 @@ This validates Aura's Node 22 compatibility lane beyond the earlier reconstructe
 
 ADR 0006 records the deployment-tool isolation decision.
 
-`tools/deploy/` now contains a deliberately separate deployment trust boundary:
+`tools/deploy/` is a deliberately separate deployment trust boundary:
 
 - exact-pinned `esbuild-wasm@0.28.2` only;
 - its own package manifest and lockfile;
@@ -81,11 +81,25 @@ ADR 0006 records the deployment-tool isolation decision.
 - a local-only `npm run plan` mode that bundles and validates configuration without making Cloudflare API calls;
 - an explicit `npm run deploy` mode that creates/reuses D1, applies migrations, verifies schema, uploads the Worker with D1/rate-limit bindings, enables `workers.dev`, and checks that unauthenticated `/mcp` access receives the expected `401 Bearer` challenge.
 
-The direct deployment path uses Cloudflare's documented HTTP APIs and built-in Node/Web Platform primitives. If it proves brittle or begins growing into a replacement Cloudflare CLI, stop and use the isolated Wrangler fallback instead.
+The operator-host plan pass on 2026-09-06 completed with:
+
+```text
+Worker:        aura-mcp
+MCP URL:       https://aura-mcp.auramonster.workers.dev/mcp
+D1 database:   aura
+Rate limits:   AUTH=1001, AGENT=1002
+Migrations:    0001_initial.sql
+Bundle bytes:  651803
+Cloudflare changes: none
+```
+
+The isolated deploy lock installed one package with zero reported vulnerabilities, one verified registry signature, and one verified attestation.
+
+The direct deployment path uses Cloudflare's documented HTTP APIs and built-in Node/Web Platform primitives. Current Cloudflare documentation confirms multipart Worker uploads with D1/rate-limit bindings, D1 multi-statement batch execution, and Worker `workers.dev` subdomain enablement. If the direct path proves brittle or begins growing into a replacement Cloudflare CLI, stop and use the isolated Wrangler fallback instead.
 
 ## Required before closing Phase 3
 
-1. Install/verify the isolated deploy tool and run its local-only deployment plan on the operator host.
+1. **Completed:** install/verify the isolated deploy tool and run its local-only deployment plan on the operator host.
 2. Review the plan output, then explicitly deploy with the narrowly scoped Cloudflare API token.
 3. Confirm D1 migration/schema and the unauthenticated MCP `401 Bearer` smoke test on the real Worker.
 4. Create two distinct pilot agent identities/credentials plus minimal allowed test content.
