@@ -85,7 +85,7 @@ const otherAdmin: HumanPrincipal = {
   displayName: null,
 };
 
-test("human creates an owned read-only agent credential and secret is verifier-only", async () => {
+test("human creates an owned read-and-post agent credential and secret is verifier-only", async () => {
   const db = new DatabaseAdapter();
   seedHuman(db, HUMAN_ID, "owner");
   const created = await createOwnedAgent(db, owner, { name: "Helper", model: "Model X", client: "Client Y" }, 100);
@@ -93,18 +93,20 @@ test("human creates an owned read-only agent credential and secret is verifier-o
   if (!created.ok) return db.close();
   assert.match(created.value.token, /^aura\.v1\./);
 
-  const row = db.sqlite.prepare(`SELECT a.owner_human_id, a.name, c.secret_verifier, cc.capability
+  const row = db.sqlite.prepare(`SELECT a.owner_human_id, a.name, c.secret_verifier
     FROM agents a
     JOIN agent_credentials c ON c.agent_id=a.id
-    JOIN agent_credential_capabilities cc ON cc.credential_id=c.credential_id
     WHERE a.id=?`).get(created.value.agentId) as {
-      owner_human_id: string; name: string; secret_verifier: string; capability: string;
+      owner_human_id: string; name: string; secret_verifier: string;
     };
   assert.equal(row.owner_human_id, HUMAN_ID);
   assert.equal(row.name, "Helper");
-  assert.equal(row.capability, "read");
   assert.match(row.secret_verifier, /^[0-9a-f]{64}$/);
   assert.equal(row.secret_verifier.includes(created.value.token), false);
+  const capabilities = db.sqlite.prepare(`SELECT capability FROM agent_credential_capabilities
+    WHERE credential_id=? ORDER BY capability`).all(created.value.credentialId)
+    .map((entry) => (entry as { capability: string }).capability);
+  assert.deepEqual(capabilities, ["post", "read"]);
 
   const listed = await listOwnedAgents(db, owner);
   assert.equal(listed.ok, true);
@@ -118,7 +120,7 @@ test("human creates an owned read-only agent credential and secret is verifier-o
   db.close();
 });
 
-test("credential rotation revokes the old credential and admin cannot mint for another owner", async () => {
+test("credential rotation revokes the old credential, grants read+post, and admin cannot mint for another owner", async () => {
   const db = new DatabaseAdapter();
   seedHuman(db, HUMAN_ID, "owner");
   seedHuman(db, OTHER_ID, "admin");
@@ -136,6 +138,10 @@ test("credential rotation revokes the old credential and admin cannot mint for a
   assert.notEqual(rotated.value.credentialId, created.value.credentialId);
   assert.equal((db.sqlite.prepare("SELECT status FROM agent_credentials WHERE credential_id=?").get(created.value.credentialId) as { status: string }).status, "revoked");
   assert.equal((db.sqlite.prepare("SELECT status FROM agent_credentials WHERE credential_id=?").get(rotated.value.credentialId) as { status: string }).status, "active");
+  const capabilities = db.sqlite.prepare(`SELECT capability FROM agent_credential_capabilities
+    WHERE credential_id=? ORDER BY capability`).all(rotated.value.credentialId)
+    .map((entry) => (entry as { capability: string }).capability);
+  assert.deepEqual(capabilities, ["post", "read"]);
   db.close();
 });
 
