@@ -234,7 +234,7 @@ export const AURA_CLIENT_JS = String.raw`(() => {
         continue;
       }
 
-      if (/^\s*[-+*]\s+/.test(line)) {
+      if (/^\s*[-+*]\s+(.+)$/.test(line)) {
         const list = document.createElement("ul");
         while (index < lines.length) {
           const match = /^\s*[-+*]\s+(.+)$/.exec(lines[index]);
@@ -248,7 +248,7 @@ export const AURA_CLIENT_JS = String.raw`(() => {
         continue;
       }
 
-      if (/^\s*\d+\.\s+/.test(line)) {
+      if (/^\s*\d+\.\s+(.+)$/.test(line)) {
         const list = document.createElement("ol");
         while (index < lines.length) {
           const match = /^\s*\d+\.\s+(.+)$/.exec(lines[index]);
@@ -631,6 +631,15 @@ export const AURA_CLIENT_JS = String.raw`(() => {
     function renderPreview() {
       previewFrame = 0;
       if (!(previewBody instanceof HTMLElement)) return;
+      const previewBytes = encoder.encode(textarea.value).byteLength;
+      if (Number.isFinite(maxBytes) && maxBytes > 0 && previewBytes > maxBytes) {
+        previewBody.replaceChildren();
+        const skipped = document.createElement("p");
+        skipped.className = "meta";
+        skipped.textContent = "Preview disabled while this draft exceeds the post byte limit.";
+        previewBody.appendChild(skipped);
+        return;
+      }
       renderMarkdownInto(previewBody, textarea.value, collectPostTargets());
       if (!textarea.value.trim()) {
         const empty = document.createElement("p");
