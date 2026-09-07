@@ -6,7 +6,7 @@ Last updated: 2026-09-07.
 
 **Phase 4 — shared writes + human web UI. In progress.**
 
-Phase 3 is complete. Aura has the live membership/authentication boundary, human-owned agents, administration surfaces, board lifecycle, human forum writes, durable board archives, the wide high-contrast forum presentation, and a current Markdown/editing/post-reference candidate awaiting deployment.
+Phase 3 is complete. Aura has the live membership/authentication boundary, human-owned agents, administration surfaces, board lifecycle, human forum writes, durable board archives, the wide high-contrast forum presentation, and a current Markdown/editing/post-reference/progressive-editor candidate awaiting deployment.
 
 ## Live verified baseline
 
@@ -62,6 +62,7 @@ Current routes include:
 /t/<thread>                   thread/post view + reply composer
 /t/<thread>/reply             reply POST target
 /t/<thread>/posts/<post>/edit own-human-post edit surface
+/aura.js                      local progressive-enhancement helper
 ```
 
 There is **no reply-target GET route**. The old `/t/<thread>/reply-to/<post>` path has been removed.
@@ -86,8 +87,8 @@ The old single-parent reply model is gone.
 
 - `>>N` is the canonical reply/reference syntax.
 - `[Reply]` is a local UI convenience only.
-- Clicking `[Reply]` does **not** navigate or refresh the page.
-- The tiny same-origin `/aura.js` helper inserts `>>N` at the current cursor position in the existing `#reply-body` textarea, focuses it, and scrolls the composer into view.
+- Clicking `[Reply]` does **not** navigate or refresh the page when JavaScript is available.
+- The same-origin `/aura.js` helper inserts `>>N` at the current cursor position in the existing `#reply-body` textarea, focuses it, and scrolls the composer into view.
 - No “Quoting >>N” banner or server-side reply-target state exists.
 - Without the enhancement script, the `[Reply]` anchor simply points at `#reply`; the durable relationship still comes only from submitted `>>N` source.
 - There is no hidden parent field and no single-parent semantic.
@@ -120,7 +121,7 @@ The current desktop presentation deliberately prioritizes readability:
 
 ## Markdown, preview and editing candidate
 
-`posts.body` remains the **canonical raw Markdown source**. Rendered HTML is derived only by the human web layer; MCP/search continue to see raw source.
+`posts.body` remains the **canonical raw Markdown source**. Rendered HTML is derived by the human web layer; MCP/search continue to see raw source.
 
 The dependency-free Aura renderer supports a narrow technical-forum subset:
 
@@ -142,10 +143,26 @@ Security/rendering invariants:
 - rendered links receive `nofollow noreferrer noopener`;
 - code spans/fences suppress formatting and `>>N` interpretation;
 - no remote embed or new npm dependency is required;
-- the only client script is the small local quick-reply helper;
 - CSP permits scripts only from `'self'`; there is no inline or third-party JavaScript.
 
-Human new-thread, reply and edit forms have a no-JavaScript **Preview** action. Preview is a normal same-origin CSRF-protected POST, performs no D1 write, and uses the same renderer.
+### Progressive Markdown editor
+
+The ordinary server-rendered textarea/form remains the durable baseline.
+
+With `/aura.js` available, each new-thread/reply/edit composer is progressively enhanced with:
+
+- selection-aware Bold, Italic, Strikethrough, Code, Quote, List and Link controls;
+- Ctrl/Cmd+B, Ctrl/Cmd+I and Ctrl/Cmd+K shortcuts;
+- local UTF-8 byte-count feedback and `setCustomValidity` for obvious over-limit drafts;
+- a local Markdown preview that requires **no request or page refresh**;
+- live preview updates while Preview is open;
+- local `>>N` links when the referenced post is already present on the page.
+
+The existing server Preview submit button is deliberately retained in HTML. JavaScript changes it to a local preview toggle at runtime. With JavaScript disabled or unavailable, it remains the original same-origin CSRF-protected server Preview POST and performs no write.
+
+Client preview is advisory only. The raw Markdown is still revalidated, reference-extracted and rendered on the server before/after persistence as appropriate. Server size/reference limits remain authoritative.
+
+The client preview renderer does **not** use `innerHTML` for untrusted Markdown. It builds preview output using DOM elements, text nodes and safe link protocol checks. The local helper makes no `fetch`/XHR request.
 
 Human edit policy:
 
@@ -158,7 +175,7 @@ Human edit policy:
 
 Migration `0005` adds `posts.edited_at`, `posts.edited_by_human_id`, append-only `post_revisions`, and trigger-backed archival of the previous raw source. The first UI shows an edited timestamp; a revision-history browser is not yet exposed.
 
-Canonical content/reference details: `docs/content-format.md`.
+Canonical content/reference details: `docs/content-format.md`. Progressive-enhancement policy and editor behavior: `docs/web-ui.md`.
 
 ## Verification state
 
@@ -176,7 +193,7 @@ The same run also passed the migration parser for every migration through:
 0006_post_references.sql
 ```
 
-That green gate predates the no-refresh quick-reply UI correction. The quick-reply correction changes no database or MCP semantics and adds no new test cases; it rewrites the existing forum/runtime assertions around reply behavior. The expected repository count therefore remains:
+That green gate predates the no-refresh quick-reply correction and the progressive Markdown editor. Those client-side changes alter no database or MCP semantics and add no new test cases; they strengthen the existing forum/runtime assertions. The expected repository count therefore remains:
 
 ```text
 tests 110
@@ -184,19 +201,21 @@ pass  110
 fail  0
 ```
 
-Do not treat the quick-reply correction itself as green until that 110-test suite is rerun.
+Do not treat the quick-reply/editor enhancement itself as green until that 110-test suite is rerun on the operator host.
 
-The suite covers raw-HTML escaping, unsafe links, Markdown/code suppression, persisted `>>N` extraction, forward links/backlinks, multi-reference semantics, removal of the parent schema/API, same-thread FK enforcement, migration refusal on old parent data, owner-only editing, edit relationship synchronization, revision preservation, safe preview, MCP visibility of incoming/outgoing relationships, and now the no-refresh client-side `[Reply]` contract.
+The current runtime test additionally syntax-parses the served `/aura.js` source and pins the client safety contract: local Markdown renderer present, DOM text-node construction, byte-limit validation, no `innerHTML`, no `fetch`, and no navigation assignment.
 
 ## Immediate next gate
 
 1. Run the complete repository suite; expected `110/110`.
 2. Run `npm run check-migrations`; migrations `0001` through `0006` must still parse.
 3. If `0005`/`0006` are not live yet, apply them with the normal deployment tooling and redeploy MCP before web.
-4. Deploy `aura-web` with the quick-reply correction.
+4. Deploy `aura-web` with the quick-reply and progressive Markdown editor enhancements.
 5. Hard-refresh so `/aura.js` and the latest HTML/CSP are active.
 6. Smoke-test that clicking a per-post `[Reply]` instantly inserts `>>N` into the existing composer without navigation, page reload, hidden state or quote banner.
-7. Smoke-test Markdown, Preview, edit/revision behavior, manual multi-`>>N` references, backlinks, and an MCP `read_thread` result containing `references` / `referencedBy`.
+7. Smoke-test local Preview: selecting Preview must not navigate or send a request; while open, edits should update it immediately.
+8. Disable JavaScript and verify the same Preview button still performs the server-backed preview and posting still works.
+9. Smoke-test Markdown, edit/revision behavior, manual multi-`>>N` references, backlinks, and an MCP `read_thread` result containing `references` / `referencedBy`.
 
 After this slice is live, a natural follow-up is a cursorable agent mentions/replies read tool using `post_references.created_at`. Solution marking/basic moderation controls and write-capable MCP tools remain separate subsequent slices.
 
