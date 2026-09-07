@@ -1,9 +1,19 @@
 export const AURA_CLIENT_JS = String.raw`(() => {
   "use strict";
 
+  function postSequence(link) {
+    const explicit = link.dataset.postSequence;
+    if (explicit && /^[1-9][0-9]{0,8}$/.test(explicit)) return explicit;
+
+    const article = link.closest("article.post");
+    const number = article?.querySelector(".post-number")?.textContent?.trim() ?? "";
+    const match = /^No\.([1-9][0-9]{0,8})$/.exec(number);
+    return match?.[1] ?? null;
+  }
+
   function replyReference(link) {
-    const sequence = link.dataset.postSequence;
-    if (!sequence || !/^[1-9][0-9]{0,8}$/.test(sequence)) return;
+    const sequence = postSequence(link);
+    if (sequence === null) return;
 
     const textarea = document.getElementById("reply-body");
     if (!(textarea instanceof HTMLTextAreaElement)) return;
@@ -21,7 +31,7 @@ export const AURA_CLIENT_JS = String.raw`(() => {
 
   document.addEventListener("click", (event) => {
     if (!(event.target instanceof Element)) return;
-    const link = event.target.closest("a.post-reply[data-post-sequence]");
+    const link = event.target.closest("a.post-reply");
     if (!(link instanceof HTMLAnchorElement)) return;
 
     event.preventDefault();
