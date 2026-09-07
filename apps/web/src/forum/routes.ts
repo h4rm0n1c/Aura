@@ -308,10 +308,9 @@ async function threadPage(
   const editedAtByPostId = await loadPostEditedAt(db, threadId);
   if (editedAtByPostId === null) return forumErrorPage("internal_error", principal, `/b/${page.board.slug}`);
   const boards = await loadBoardNavigation(db, principal);
-  const sequenceById = new Map(page.posts.map((post) => [post.postId, post.sequence]));
   const postIdBySequence = new Map(page.posts.map((post) => [post.sequence, post.postId]));
   const posts = page.posts
-    .map((post) => renderPost(page, post, principal, sequenceById, postIdBySequence, authorityByHumanId, editedAtByPostId))
+    .map((post) => renderPost(page, post, principal, authorityByHumanId, editedAtByPostId))
     .join("\n");
   const archived = page.thread.listingState === "archived";
   const replyHtml = archived
@@ -340,17 +339,9 @@ function renderPost(
   page: ForumThreadPage,
   post: ForumPost,
   principal: HumanPrincipal,
-  sequenceById: ReadonlyMap<string, number>,
-  postIdBySequence: ReadonlyMap<number, string>,
   authorityByHumanId: ReadonlyMap<string, ForumHumanAuthority>,
   editedAtByPostId: ReadonlyMap<string, number>,
 ): string {
-  const parentSequence = post.parentPostId === null ? null : sequenceById.get(post.parentPostId) ?? null;
-  const parent = post.parentPostId === null
-    ? ""
-    : parentSequence === null
-      ? `<span class="meta">parent <code>${escapeHtml(post.parentPostId)}</code></span>`
-      : `<a class="parent-link" href="#p-${escapeHtml(post.parentPostId)}">&gt;&gt;${parentSequence}</a>`;
   const confidence = post.confidence === null ? "" : ` · confidence ${escapeHtml(post.confidence)}`;
   const editedAt = editedAtByPostId.get(post.postId) ?? null;
   const edited = editedAt === null
@@ -366,11 +357,15 @@ function renderPost(
   const editLink = canEdit
     ? `[<a class="post-edit" href="/t/${escapeHtml(page.thread.threadId)}/posts/${escapeHtml(post.postId)}/edit">Edit</a>]`
     : "";
+  const referenceMap = new Map(post.references.map((reference) => [reference.sequence, reference.postId]));
+  const backlinks = post.referencedBy.length === 0
+    ? ""
+    : `<span class="post-backlinks" aria-label="Posts referencing No.${post.sequence}">${post.referencedBy.map((reference) => `<a class="post-backlink" href="#p-${escapeHtml(reference.postId)}">&gt;&gt;${reference.sequence}</a>`).join(" ")}</span>`;
 
   return `<article class="post post-${escapeHtml(post.author.kind)}" id="p-${escapeHtml(post.postId)}">
 <aside class="post-author-rail"><div class="post-author-icon" aria-hidden="true"></div><span class="author-kind">${post.author.kind.toUpperCase()}</span><strong class="post-author">${escapeHtml(post.author.displayName)}</strong>${capcode}${provenance}</aside>
-<div class="post-content"><header class="post-head"><div class="post-meta"><span class="post-secondary"><time datetime="${escapeHtml(isoTime(post.createdAt))}">${escapeHtml(formatTimestamp(post.createdAt))}</time>${edited}${confidence} ${parent}</span><a class="post-number" href="#p-${escapeHtml(post.postId)}" aria-label="Permanent link to post ${post.sequence}">No.${post.sequence}</a></div><div class="post-actions">${replyLink}${replyLink && editLink ? " " : ""}${editLink}</div></header>
-<div class="post-body markdown-body">${renderMarkdown(post.body, { postIdBySequence })}</div></div>
+<div class="post-content"><header class="post-head"><div class="post-meta"><span class="post-secondary"><time datetime="${escapeHtml(isoTime(post.createdAt))}">${escapeHtml(formatTimestamp(post.createdAt))}</time>${edited}${confidence}</span><a class="post-number" href="#p-${escapeHtml(post.postId)}" aria-label="Permanent link to post ${post.sequence}">No.${post.sequence}</a>${backlinks}</div><div class="post-actions">${replyLink}${replyLink && editLink ? " " : ""}${editLink}</div></header>
+<div class="post-body markdown-body">${renderMarkdown(post.body, { postIdBySequence: referenceMap })}</div></div>
 </article>`;
 }
 
@@ -386,7 +381,7 @@ async function replyComposer(
   const csrf = await issueForumCsrf(csrfKey, principal, path);
   const target = replyTarget === null
     ? ""
-    : `<div class="notice reply-target"><strong>Replying to &gt;&gt;${replyTarget.sequence}</strong> — ${escapeHtml(replyTarget.author.displayName)} <a href="/t/${escapeHtml(page.thread.threadId)}#p-${escapeHtml(replyTarget.postId)}">view post</a> · <a href="/t/${escapeHtml(page.thread.threadId)}#reply">clear</a></div>`;
+    : `<div class="notice reply-target"><strong>Quoting &gt;&gt;${replyTarget.sequence}</strong> — ${escapeHtml(replyTarget.author.displayName)} <a href="/t/${escapeHtml(page.thread.threadId)}#p-${escapeHtml(replyTarget.postId)}">view post</a> · <a href="/t/${escapeHtml(page.thread.threadId)}#reply">clear</a></div>`;
   const initialBody = draftBody ?? (replyTarget === null ? "" : `>>${replyTarget.sequence}\n`);
   const preview = draftBody === null ? "" : renderPreview(draftBody, postIdBySequence);
 
@@ -395,7 +390,6 @@ async function replyComposer(
 ${target}
 <form method="post" action="${escapeHtml(path)}">
 <input type="hidden" name="csrf" value="${escapeHtml(csrf)}">
-${replyTarget === null ? "" : `<input type="hidden" name="parent_post_id" value="${escapeHtml(replyTarget.postId)}">`}
 ${preview}
 <p><label for="reply-body">Post</label><textarea id="reply-body" name="body" rows="8" required>${escapeHtml(initialBody)}</textarea></p>
 ${renderMarkdownHelp()}
@@ -507,17 +501,15 @@ async function createReplyPost(
 ): Promise<Response> {
   const parsed = await readForumForm(request, url, csrfKey, principal);
   if (!parsed.ok) return parsed.response;
-  const parentPostId = parsed.form.get("parent_post_id");
   const body = parsed.form.get("body");
   if (parsed.form.get("intent") === "preview") {
     if (!validMarkdownBody(body)) return forumErrorPage("validation_error", principal, `/t/${threadId}`);
-    return threadPage(db, csrfKey, principal, threadId, parentPostId === null || parentPostId === "" ? null : parentPostId, body);
+    return threadPage(db, csrfKey, principal, threadId, null, body);
   }
 
   const result = await createHumanReply(db, principal, {
     threadId,
     body,
-    ...(parentPostId === null || parentPostId === "" ? {} : { parentPostId }),
   }, Math.floor(Date.now() / 1000));
   if (!result.ok) return forumErrorPage(result.error.code, principal, `/t/${threadId}`);
   return redirectResponse(`/t/${threadId}#p-${result.value.postId}`);
@@ -558,8 +550,8 @@ function renderPreview(body: string, postIdBySequence?: ReadonlyMap<number, stri
 
 function renderMarkdownHelp(extra: string | null = null): string {
   const suffix = extra === null ? "" : ` · ${escapeHtml(extra)}`;
-  return `<p class="meta">Markdown · maximum ${MCP_LIMITS.postBytes.toLocaleString("en-US")} UTF-8 bytes${suffix}.</p>
-<details class="markdown-help"><summary>Formatting help</summary><div><code>**bold**</code> · <code>*italic*</code> · <code>~~strike~~</code> · <code>\`code\`</code> · <code>[link](https://example.com)</code> · <code>&gt; quote</code> · lists · headings · fenced code blocks. Raw HTML is displayed as text.</div></details>`;
+  return `<p class="meta">Markdown · maximum ${MCP_LIMITS.postBytes.toLocaleString("en-US")} UTF-8 bytes · up to ${MCP_LIMITS.postReferences} distinct post references${suffix}.</p>
+<details class="markdown-help"><summary>Formatting help</summary><div><code>**bold**</code> · <code>*italic*</code> · <code>~~strike~~</code> · <code>\`code\`</code> · <code>[link](https://example.com)</code> · <code>&gt; quote</code> · <code>&gt;&gt;N</code> post reference · lists · headings · fenced code blocks. Raw HTML is displayed as text.</div></details>`;
 }
 
 function validPreviewTitle(value: string | null): value is string {
@@ -742,7 +734,7 @@ function forumErrorPage(code: string, principal: HumanPrincipal, returnPath: str
           ? 404
           : 500;
   const message = code === "validation_error"
-    ? "The post or forum request was invalid. Check the title, body size, and reply target."
+    ? "The post or forum request was invalid. Check the title, body size, and post references."
     : code === "forbidden"
       ? "You do not have permission for that forum action."
       : code === "thread_locked"
