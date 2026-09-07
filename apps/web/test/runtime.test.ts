@@ -114,6 +114,9 @@ test("web shell serves rules with restrictive browser headers, local JS and visi
   assert.match(script, /requestAnimationFrame/);
   assert.match(script, /aria-selected/);
   assert.match(script, /Ctrl\+B/);
+  assert.ok(script.includes('if (/^\\s*[-+*]\\s+(.+)$/.test(line)) {'));
+  assert.ok(script.includes('if (/^\\s*\\d+\\.\\s+(.+)$/.test(line)) {'));
+  assert.ok(script.includes("Preview disabled while this draft exceeds the post byte limit."));
   assert.doesNotMatch(script, /innerHTML/);
   assert.doesNotMatch(script, /fetch\(/);
   assert.doesNotMatch(script, /location\s*=/);
