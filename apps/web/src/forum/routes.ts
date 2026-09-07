@@ -45,7 +45,6 @@ const BOARD_ARCHIVE_PATH = new RegExp(`^/b/(${BOARD_SLUG})/archive$`);
 const BOARD_CREATE_THREAD_PATH = new RegExp(`^/b/(${BOARD_SLUG})/threads$`);
 const THREAD_PATH = new RegExp(`^/t/(${THREAD_ID})$`);
 const THREAD_REPLY_PATH = new RegExp(`^/t/(${THREAD_ID})/reply$`);
-const THREAD_REPLY_TO_PATH = new RegExp(`^/t/(${THREAD_ID})/reply-to/(${POST_ID})$`);
 const POST_EDIT_PATH = new RegExp(`^/t/(${THREAD_ID})/posts/(${POST_ID})/edit$`);
 const MAX_FORM_BYTES = 48 * 1024;
 const RECENT_THREAD_LIMIT = 5;
@@ -108,12 +107,8 @@ export async function handleForumRequest(
     if (boardMatch !== null) return boardPage(db, csrfKey, principal, boardMatch[1]);
 
     const threadMatch = url.pathname.match(THREAD_PATH);
-    if (threadMatch !== null) return threadPage(db, csrfKey, principal, threadMatch[1], null, null);
+    if (threadMatch !== null) return threadPage(db, csrfKey, principal, threadMatch[1], null);
 
-    const replyToMatch = url.pathname.match(THREAD_REPLY_TO_PATH);
-    if (replyToMatch !== null) {
-      return threadPage(db, csrfKey, principal, replyToMatch[1], replyToMatch[2], null);
-    }
     return null;
   }
 
@@ -142,7 +137,6 @@ export async function handleForumRequest(
     BOARD_CREATE_THREAD_PATH.test(url.pathname) ||
     THREAD_PATH.test(url.pathname) ||
     THREAD_REPLY_PATH.test(url.pathname) ||
-    THREAD_REPLY_TO_PATH.test(url.pathname) ||
     POST_EDIT_PATH.test(url.pathname)
   ) {
     return methodNotAllowed("GET, POST");
@@ -287,22 +281,11 @@ async function threadPage(
   csrfKey: Uint8Array,
   principal: HumanPrincipal,
   threadId: string,
-  replyTargetId: string | null,
   draftBody: string | null,
 ): Promise<Response> {
   const result = await getForumThread(db, principal, threadId);
   if (!result.ok) return forumErrorPage(result.error.code, principal, "/");
   const page = result.value;
-
-  if (page.thread.listingState === "archived" && replyTargetId !== null) {
-    return forumErrorPage("thread_archived", principal, `/t/${threadId}`);
-  }
-
-  let replyTarget: ForumPost | null = null;
-  if (replyTargetId !== null) {
-    replyTarget = page.posts.find((post) => post.postId === replyTargetId) ?? null;
-    if (replyTarget === null) return forumErrorPage("not_found", principal, `/t/${threadId}`);
-  }
 
   const authorityByHumanId = await loadThreadHumanAuthorities(db, page.board.boardId, threadId);
   if (authorityByHumanId === null) return forumErrorPage("internal_error", principal, `/b/${page.board.slug}`);
@@ -318,7 +301,7 @@ async function threadPage(
     ? `<div class="box notice"><p>This thread has fallen off /${escapeHtml(page.board.slug)}/ and is archived. It remains readable but no longer accepts replies.</p></div>`
     : page.thread.state === "locked"
       ? `<div class="box notice"><p>This thread is locked. New replies are disabled.</p></div>`
-      : await replyComposer(csrfKey, principal, page, replyTarget, draftBody, postIdBySequence);
+      : await replyComposer(csrfKey, principal, page, draftBody, postIdBySequence);
   const replyAction = archived || page.thread.state === "locked"
     ? ""
     : `<a class="forum-action forum-action-primary" href="#reply">Reply</a>`;
@@ -353,7 +336,7 @@ function renderPost(
   const canReply = page.thread.listingState === "live" && page.thread.state !== "locked";
   const canEdit = canReply && post.author.kind === "human" && post.author.humanId === principal.humanId;
   const replyLink = canReply
-    ? `[<a class="post-reply" href="/t/${escapeHtml(page.thread.threadId)}/reply-to/${escapeHtml(post.postId)}#reply">Reply</a>]`
+    ? `[<a class="post-reply" href="#reply" data-post-sequence="${post.sequence}">Reply</a>]`
     : "";
   const editLink = canEdit
     ? `[<a class="post-edit" href="/t/${escapeHtml(page.thread.threadId)}/posts/${escapeHtml(post.postId)}/edit">Edit</a>]`
@@ -374,21 +357,16 @@ async function replyComposer(
   csrfKey: Uint8Array,
   principal: HumanPrincipal,
   page: ForumThreadPage,
-  replyTarget: ForumPost | null,
   draftBody: string | null,
   postIdBySequence: ReadonlyMap<number, string>,
 ): Promise<string> {
   const path = `/t/${page.thread.threadId}/reply`;
   const csrf = await issueForumCsrf(csrfKey, principal, path);
-  const target = replyTarget === null
-    ? ""
-    : `<div class="notice reply-target"><strong>Quoting &gt;&gt;${replyTarget.sequence}</strong> — ${escapeHtml(replyTarget.author.displayName)} <a href="/t/${escapeHtml(page.thread.threadId)}#p-${escapeHtml(replyTarget.postId)}">view post</a> · <a href="/t/${escapeHtml(page.thread.threadId)}#reply">clear</a></div>`;
-  const initialBody = draftBody ?? (replyTarget === null ? "" : `>>${replyTarget.sequence}\n`);
+  const initialBody = draftBody ?? "";
   const preview = draftBody === null ? "" : renderPreview(draftBody, postIdBySequence);
 
   return `<h2 id="reply">Reply</h2>
 <div class="box composer">
-${target}
 <form method="post" action="${escapeHtml(path)}">
 <input type="hidden" name="csrf" value="${escapeHtml(csrf)}">
 ${preview}
@@ -505,7 +483,7 @@ async function createReplyPost(
   const body = parsed.form.get("body");
   if (parsed.form.get("intent") === "preview") {
     if (!validMarkdownBody(body)) return forumErrorPage("validation_error", principal, `/t/${threadId}`);
-    return threadPage(db, csrfKey, principal, threadId, null, body);
+    return threadPage(db, csrfKey, principal, threadId, body);
   }
 
   const result = await createHumanReply(db, principal, {
