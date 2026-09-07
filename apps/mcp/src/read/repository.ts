@@ -11,6 +11,7 @@ import {
   MCP_LIMITS,
   type BoardSummary,
   type Page,
+  type PostReferenceView,
   type PostView,
   type SearchHit,
   type ThreadSummary,
@@ -51,8 +52,15 @@ interface PostRow {
   authorAgentId: unknown;
   body: unknown;
   confidence: unknown;
-  parentPostId: unknown;
   createdAt: unknown;
+}
+
+interface PostReferenceRow {
+  sourcePostId: unknown;
+  sourceSequence: unknown;
+  targetPostId: unknown;
+  targetSequence: unknown;
+  referencedAt: unknown;
 }
 
 interface SearchRow extends PostRow {
@@ -63,7 +71,16 @@ interface SearchRow extends PostRow {
   threadAuthorAgentId: unknown;
 }
 
+interface PostRelations {
+  readonly references: readonly PostReferenceView[];
+  readonly referencedBy: readonly PostReferenceView[];
+}
+
 const SYSTEM_AUTHOR = Object.freeze({ kind: "system", label: "aura" }) as const;
+const EMPTY_RELATIONS: PostRelations = Object.freeze({
+  references: Object.freeze([]),
+  referencedBy: Object.freeze([]),
+});
 
 export async function listBoards(
   db: D1DatabaseLike,
@@ -223,7 +240,6 @@ export async function readThread(
         p.author_agent_id AS authorAgentId,
         p.body AS body,
         p.confidence AS confidence,
-        p.parent_post_id AS parentPostId,
         p.created_at AS createdAt
       FROM posts p
       WHERE p.thread_id = ?1
@@ -234,9 +250,21 @@ export async function readThread(
     .bind(threadId, afterSequence, limit + 1)
     .all<PostRow>();
 
+  const pageRows = rows.results.slice(0, limit);
+  const postIds: string[] = [];
+  for (const row of pageRows) {
+    const base = mapPost(row, EMPTY_RELATIONS);
+    if (base === null) return internal();
+    postIds.push(base.postId);
+  }
+
+  const relations = await loadPostRelations(db, threadId, postIds);
+  if (relations === null) return internal();
+
   const posts: PostView[] = [];
-  for (const row of rows.results.slice(0, limit)) {
-    const post = mapPost(row);
+  for (const row of pageRows) {
+    if (!isAuraId("post", row.postId)) return internal();
+    const post = mapPost(row, relations.get(row.postId) ?? EMPTY_RELATIONS);
     if (post === null) return internal();
     posts.push(post);
   }
@@ -292,7 +320,6 @@ export async function search(
         p.author_agent_id AS authorAgentId,
         p.body AS body,
         p.confidence AS confidence,
-        p.parent_post_id AS parentPostId,
         p.created_at AS createdAt
       FROM posts p
       JOIN threads t ON t.id = p.thread_id
@@ -333,6 +360,86 @@ export async function search(
   return ok(Object.freeze({ items: Object.freeze(items), nextCursor }));
 }
 
+async function loadPostRelations(
+  db: D1DatabaseLike,
+  threadId: string,
+  postIds: readonly string[],
+): Promise<ReadonlyMap<string, PostRelations> | null> {
+  if (postIds.length === 0) return new Map();
+  const first = postIds.map((_id, index) => `?${index + 2}`).join(", ");
+  const secondOffset = postIds.length + 2;
+  const second = postIds.map((_id, index) => `?${index + secondOffset}`).join(", ");
+
+  let rows: readonly PostReferenceRow[];
+  try {
+    const result = await db.prepare(`SELECT
+        r.source_post_id AS sourcePostId,
+        source.sequence AS sourceSequence,
+        r.target_post_id AS targetPostId,
+        target.sequence AS targetSequence,
+        r.created_at AS referencedAt
+      FROM post_references r
+      JOIN posts source
+        ON source.id = r.source_post_id
+       AND source.thread_id = r.thread_id
+       AND source.visibility = 'visible'
+      JOIN posts target
+        ON target.id = r.target_post_id
+       AND target.thread_id = r.thread_id
+       AND target.visibility = 'visible'
+      WHERE r.thread_id = ?1
+        AND (r.source_post_id IN (${first}) OR r.target_post_id IN (${second}))
+      ORDER BY r.created_at ASC, source.sequence ASC, target.sequence ASC`)
+      .bind(threadId, ...postIds, ...postIds)
+      .all<PostReferenceRow>();
+    rows = result.results ?? [];
+  } catch {
+    return null;
+  }
+
+  const selected = new Set(postIds);
+  const mutable = new Map<string, { references: PostReferenceView[]; referencedBy: PostReferenceView[] }>();
+  for (const postId of postIds) mutable.set(postId, { references: [], referencedBy: [] });
+
+  for (const row of rows) {
+    if (
+      !isAuraId("post", row.sourcePostId) ||
+      !isAuraId("post", row.targetPostId) ||
+      !isPositiveInteger(row.sourceSequence) ||
+      !isPositiveInteger(row.targetSequence) ||
+      !isNonNegativeInteger(row.referencedAt)
+    ) {
+      return null;
+    }
+    const referencedAt = isoTime(row.referencedAt);
+    if (referencedAt === null) return null;
+
+    if (selected.has(row.sourcePostId)) {
+      mutable.get(row.sourcePostId)?.references.push(Object.freeze({
+        postId: row.targetPostId,
+        sequence: row.targetSequence,
+        referencedAt,
+      }));
+    }
+    if (selected.has(row.targetPostId)) {
+      mutable.get(row.targetPostId)?.referencedBy.push(Object.freeze({
+        postId: row.sourcePostId,
+        sequence: row.sourceSequence,
+        referencedAt,
+      }));
+    }
+  }
+
+  const relations = new Map<string, PostRelations>();
+  for (const [postId, value] of mutable) {
+    relations.set(postId, Object.freeze({
+      references: Object.freeze(value.references),
+      referencedBy: Object.freeze(value.referencedBy),
+    }));
+  }
+  return relations;
+}
+
 function mapThread(row: ThreadRow): ThreadSummary | null {
   if (
     !isAuraId("thread", row.threadId) ||
@@ -362,7 +469,7 @@ function mapThread(row: ThreadRow): ThreadSummary | null {
   });
 }
 
-function mapPost(row: PostRow): PostView | null {
+function mapPost(row: PostRow, relations: PostRelations): PostView | null {
   if (
     !isAuraId("post", row.postId) ||
     !isAuraId("thread", row.threadId) ||
@@ -370,7 +477,6 @@ function mapPost(row: PostRow): PostView | null {
     typeof row.body !== "string" ||
     utf8Bytes(row.body) > MCP_LIMITS.postBytes ||
     !isConfidenceOrNull(row.confidence) ||
-    (row.parentPostId !== null && !isAuraId("post", row.parentPostId)) ||
     !isNonNegativeInteger(row.createdAt)
   ) {
     return null;
@@ -389,13 +495,14 @@ function mapPost(row: PostRow): PostView | null {
     author,
     content: boardText(author, row.body),
     confidence: row.confidence,
-    parentPostId: row.parentPostId,
+    references: relations.references,
+    referencedBy: relations.referencedBy,
     createdAt,
   });
 }
 
 function mapSearch(row: SearchRow): SearchHit | null {
-  const post = mapPost(row);
+  const post = mapPost(row, EMPTY_RELATIONS);
   if (
     post === null ||
     !isAuraId("board", row.boardId) ||
