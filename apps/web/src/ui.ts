@@ -143,11 +143,12 @@ td form.inline { display: inline-flex; gap: .4rem; align-items: center; margin: 
 .post-secondary { min-width: 0; color: var(--muted); font-size: .88rem; overflow-wrap: anywhere; }
 .post-number { font-weight: 600; text-decoration: none; }
 .post-number:hover { text-decoration: underline; }
+.post-backlinks { display: inline-flex; gap: .32rem; align-items: baseline; flex-wrap: wrap; font-size: .84rem; }
+.post-backlink, .post-ref { font-weight: 600; text-decoration: none; }
+.post-backlink:hover, .post-ref:hover { text-decoration: underline; }
 .post-actions { flex: none; font-size: .88rem; }
 .post-reply, .post-edit { font-weight: 600; text-decoration: none; }
 .post-reply:hover, .post-edit:hover { text-decoration: underline; }
-.parent-link, .post-ref { font-weight: 600; text-decoration: none; }
-.parent-link:hover, .post-ref:hover { text-decoration: underline; }
 .post-body { flex: 1; min-height: 7rem; padding: .88rem .95rem 1.05rem; overflow-wrap: anywhere; tab-size: 4; font-size: 1rem; line-height: 1.55; }
 .markdown-body > :first-child { margin-top: 0; }
 .markdown-body > :last-child { margin-bottom: 0; }
@@ -201,6 +202,7 @@ body > footer { max-width: var(--shell-width); margin: 1rem auto; padding: 0 .8r
   .post-author-rail { flex-wrap: wrap; }
   .post-head { min-height: 2rem; padding: .28rem .5rem; }
   .post-secondary { font-size: .8rem; }
+  .post-backlinks { font-size: .76rem; }
   .post-actions { font-size: .8rem; }
   .post-body { min-height: 6rem; padding: .72rem .75rem .88rem; }
   .composer { min-height: 0; padding: .75rem .8rem .85rem; }
