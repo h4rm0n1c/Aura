@@ -1,6 +1,7 @@
 import type { AuthorRef, BoardText, Confidence } from "../domain/content.ts";
 import { domainError, type DomainError } from "../domain/errors.ts";
 import { isAuraId } from "../domain/ids.ts";
+import { extractPostReferenceSequences } from "../domain/post-references.ts";
 import type { ThreadState } from "../domain/authorization.ts";
 
 export const MCP_TOOL_NAMES = [
@@ -21,6 +22,7 @@ export const MCP_LIMITS = Object.freeze({
   titleChars: 160,
   searchChars: 512,
   postBytes: 12_288,
+  postReferences: 128,
   idempotencyKeyChars: 128,
   cursorChars: 256,
 });
@@ -60,7 +62,6 @@ export interface ReplyArgs {
   readonly threadId: string;
   readonly content: string;
   readonly confidence?: Confidence;
-  readonly parentPostId?: string;
   readonly idempotencyKey: string;
 }
 export interface MarkSolutionArgs {
@@ -88,6 +89,11 @@ export interface ThreadSummary {
   readonly replyCount: number;
   readonly lastActivityAt: string;
 }
+export interface PostReferenceView {
+  readonly postId: string;
+  readonly sequence: number;
+  readonly referencedAt: string;
+}
 export interface PostView {
   readonly postId: string;
   readonly threadId: string;
@@ -95,7 +101,8 @@ export interface PostView {
   readonly author: AuthorRef;
   readonly content: BoardText;
   readonly confidence: Confidence | null;
-  readonly parentPostId: string | null;
+  readonly references: readonly PostReferenceView[];
+  readonly referencedBy: readonly PostReferenceView[];
   readonly createdAt: string;
 }
 export interface ThreadView {
@@ -202,7 +209,13 @@ export function parseCreateThreadArgs(input: unknown): ValidationResult<CreateTh
   const postFields = [problem, state, tried, blocker, request].filter(
     (value): value is string => value !== undefined,
   );
-  if (utf8Bytes(postFields.join("\n")) > MCP_LIMITS.postBytes) return invalid();
+  const postBody = postFields.join("\n");
+  if (
+    utf8Bytes(postBody) > MCP_LIMITS.postBytes ||
+    extractPostReferenceSequences(postBody).length > MCP_LIMITS.postReferences
+  ) {
+    return invalid();
+  }
 
   return ok({
     boardId: input.boardId,
@@ -220,7 +233,7 @@ export function parseCreateThreadArgs(input: unknown): ValidationResult<CreateTh
 export function parseReplyArgs(input: unknown): ValidationResult<ReplyArgs> {
   if (
     !isRecord(input) ||
-    !onlyKeys(input, ["threadId", "content", "confidence", "parentPostId", "idempotencyKey"])
+    !onlyKeys(input, ["threadId", "content", "confidence", "idempotencyKey"])
   ) {
     return invalid();
   }
@@ -233,11 +246,9 @@ export function parseReplyArgs(input: unknown): ValidationResult<ReplyArgs> {
     content === null ||
     confidence === null ||
     idempotencyKey === null ||
-    utf8Bytes(content) > MCP_LIMITS.postBytes
+    utf8Bytes(content) > MCP_LIMITS.postBytes ||
+    extractPostReferenceSequences(content).length > MCP_LIMITS.postReferences
   ) {
-    return invalid();
-  }
-  if (input.parentPostId !== undefined && !isAuraId("post", input.parentPostId)) {
     return invalid();
   }
 
@@ -245,7 +256,6 @@ export function parseReplyArgs(input: unknown): ValidationResult<ReplyArgs> {
     threadId: input.threadId,
     content,
     ...(confidence === undefined ? {} : { confidence }),
-    ...(input.parentPostId === undefined ? {} : { parentPostId: input.parentPostId }),
     idempotencyKey,
   });
 }
