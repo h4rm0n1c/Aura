@@ -4,6 +4,12 @@ export const AURA_CLIENT_JS = String.raw`(() => {
   const TICK = String.fromCharCode(96);
   const FENCE = TICK.repeat(3);
   const encoder = new TextEncoder();
+  const MAX_INLINE_DEPTH = 16;
+  const MAX_BLOCK_DEPTH = 12;
+
+  function dispatchInput(textarea) {
+    textarea.dispatchEvent(new Event("input", { bubbles: true }));
+  }
 
   function postSequence(link) {
     const explicit = link.dataset.postSequence;
@@ -13,10 +19,6 @@ export const AURA_CLIENT_JS = String.raw`(() => {
     const number = article?.querySelector(".post-number")?.textContent?.trim() ?? "";
     const match = /^No\.([1-9][0-9]{0,8})$/.exec(number);
     return match?.[1] ?? null;
-  }
-
-  function dispatchInput(textarea) {
-    textarea.dispatchEvent(new Event("input", { bubbles: true }));
   }
 
   function replyReference(link) {
@@ -32,10 +34,8 @@ export const AURA_CLIENT_JS = String.raw`(() => {
     const needsLeadingNewline = before.length > 0 && !before.endsWith("\n");
     const insertion = (needsLeadingNewline ? "\n" : "") + ">>" + sequence + "\n";
 
-    textarea.setRangeText(insertion, start, end, "end");
-    textarea.focus({ preventScroll: true });
+    replaceText(textarea, start, end, insertion, start + insertion.length, start + insertion.length);
     textarea.scrollIntoView({ block: "center", behavior: "auto" });
-    dispatchInput(textarea);
   }
 
   function safeHref(value) {
@@ -52,7 +52,12 @@ export const AURA_CLIENT_JS = String.raw`(() => {
     parent.appendChild(document.createTextNode(value));
   }
 
-  function appendInline(parent, source, refs) {
+  function appendInline(parent, source, refs, depth = 0) {
+    if (depth >= MAX_INLINE_DEPTH) {
+      appendText(parent, source);
+      return;
+    }
+
     let index = 0;
     const escapable = "\\*_[]()~>#" + TICK;
 
@@ -78,7 +83,7 @@ export const AURA_CLIENT_JS = String.raw`(() => {
         const end = source.indexOf("**", index + 2);
         if (end !== -1) {
           const strong = document.createElement("strong");
-          appendInline(strong, source.slice(index + 2, end), refs);
+          appendInline(strong, source.slice(index + 2, end), refs, depth + 1);
           parent.appendChild(strong);
           index = end + 2;
           continue;
@@ -89,7 +94,7 @@ export const AURA_CLIENT_JS = String.raw`(() => {
         const end = source.indexOf("~~", index + 2);
         if (end !== -1) {
           const del = document.createElement("del");
-          appendInline(del, source.slice(index + 2, end), refs);
+          appendInline(del, source.slice(index + 2, end), refs, depth + 1);
           parent.appendChild(del);
           index = end + 2;
           continue;
@@ -100,7 +105,7 @@ export const AURA_CLIENT_JS = String.raw`(() => {
         const end = source.indexOf("*", index + 1);
         if (end !== -1) {
           const em = document.createElement("em");
-          appendInline(em, source.slice(index + 1, end), refs);
+          appendInline(em, source.slice(index + 1, end), refs, depth + 1);
           parent.appendChild(em);
           index = end + 1;
           continue;
@@ -117,7 +122,7 @@ export const AURA_CLIENT_JS = String.raw`(() => {
               const anchor = document.createElement("a");
               anchor.href = href;
               anchor.rel = "nofollow noreferrer noopener";
-              appendInline(anchor, source.slice(index + 1, labelEnd), new Map());
+              appendInline(anchor, source.slice(index + 1, labelEnd), new Map(), depth + 1);
               parent.appendChild(anchor);
             } else {
               appendText(parent, source.slice(index, urlEnd + 1));
@@ -169,18 +174,28 @@ export const AURA_CLIENT_JS = String.raw`(() => {
     return isFenceLine(line) !== null ||
       /^\s*#{1,6}\s+/.test(line) ||
       /^\s*>(?!>)/.test(line) ||
-      /^\s*[-+*]\s+/.test(line) ||
-      /^\s*\d+\.\s+/.test(line) ||
+      /^\s*[-+*]\s+(.+)$/.test(line) ||
+      /^\s*\d+\.\s+(.+)$/.test(line) ||
       isHorizontalRule(line);
   }
 
-  function renderMarkdownInto(container, source, refs) {
+  function renderMarkdownInto(container, source, refs, depth = 0) {
     container.replaceChildren();
+    if (depth >= MAX_BLOCK_DEPTH) {
+      appendText(container, source);
+      return;
+    }
+
     const lines = source.replaceAll("\r\n", "\n").replaceAll("\r", "\n").split("\n");
     let index = 0;
+    let guard = 0;
+    const guardLimit = lines.length * 4 + 32;
 
-    while (index < lines.length) {
+    while (index < lines.length && guard < guardLimit) {
+      guard += 1;
+      const startIndex = index;
       const line = lines[index];
+
       if (line.trim() === "") {
         index += 1;
         continue;
@@ -229,7 +244,7 @@ export const AURA_CLIENT_JS = String.raw`(() => {
           index += 1;
         }
         const blockquote = document.createElement("blockquote");
-        renderMarkdownInto(blockquote, quoted.join("\n"), refs);
+        renderMarkdownInto(blockquote, quoted.join("\n"), refs, depth + 1);
         container.appendChild(blockquote);
         continue;
       }
@@ -277,6 +292,15 @@ export const AURA_CLIENT_JS = String.raw`(() => {
         appendInline(p, paragraph[part], refs);
       }
       container.appendChild(p);
+
+      if (index === startIndex) index += 1;
+    }
+
+    if (guard >= guardLimit && index < lines.length) {
+      const stopped = document.createElement("p");
+      stopped.className = "meta";
+      stopped.textContent = "Preview stopped because the draft was too complex to render safely.";
+      container.appendChild(stopped);
     }
   }
 
@@ -350,37 +374,68 @@ export const AURA_CLIENT_JS = String.raw`(() => {
     }
   }
 
-  function setSelection(textarea, start, end) {
-    textarea.setSelectionRange(start, end);
-    textarea.focus();
+  function replaceText(textarea, start, end, replacement, selectionStart, selectionEnd) {
+    const scrollTop = textarea.scrollTop;
+    const scrollLeft = textarea.scrollLeft;
+    textarea.setRangeText(replacement, start, end, "end");
+    textarea.focus({ preventScroll: true });
+    textarea.setSelectionRange(selectionStart, selectionEnd);
+    textarea.scrollTop = scrollTop;
+    textarea.scrollLeft = scrollLeft;
     dispatchInput(textarea);
   }
 
-  function toggleWrapSelection(textarea, before, after, placeholder) {
-    const start = textarea.selectionStart ?? textarea.value.length;
-    const end = textarea.selectionEnd ?? start;
-    const selected = textarea.value.slice(start, end);
+  function wordSelectionRange(textarea) {
+    const originalStart = textarea.selectionStart ?? textarea.value.length;
+    const originalEnd = textarea.selectionEnd ?? originalStart;
+    if (originalStart !== originalEnd) {
+      return { start: originalStart, end: originalEnd, hadSelection: true, expandedWord: false };
+    }
+
+    let start = originalStart;
+    let end = originalEnd;
+    const value = textarea.value;
+    while (start > 0 && !/\s/.test(value[start - 1])) start -= 1;
+    while (end < value.length && !/\s/.test(value[end])) end += 1;
+
+    if (start === end) {
+      return { start: originalStart, end: originalEnd, hadSelection: false, expandedWord: false };
+    }
+    return { start, end, hadSelection: false, expandedWord: true };
+  }
+
+  function toggleWrapSelection(textarea, before, after) {
+    const range = wordSelectionRange(textarea);
+    const selected = textarea.value.slice(range.start, range.end);
 
     if (selected.startsWith(before) && selected.endsWith(after) && selected.length >= before.length + after.length) {
       const content = selected.slice(before.length, selected.length - after.length);
-      textarea.setRangeText(content, start, end, "end");
-      setSelection(textarea, start, start + content.length);
+      replaceText(textarea, range.start, range.end, content, range.start + content.length, range.start + content.length);
       return;
     }
 
-    const wrappedBefore = textarea.value.slice(Math.max(0, start - before.length), start) === before;
-    const wrappedAfter = textarea.value.slice(end, end + after.length) === after;
+    const wrappedBefore = textarea.value.slice(Math.max(0, range.start - before.length), range.start) === before;
+    const wrappedAfter = textarea.value.slice(range.end, range.end + after.length) === after;
     if (wrappedBefore && wrappedAfter) {
-      textarea.setRangeText(selected, start - before.length, end + after.length, "end");
-      setSelection(textarea, start - before.length, end - before.length);
+      replaceText(
+        textarea,
+        range.start - before.length,
+        range.end + after.length,
+        selected,
+        range.start - before.length + selected.length,
+        range.start - before.length + selected.length,
+      );
       return;
     }
 
-    const content = selected || placeholder;
-    textarea.setRangeText(before + content + after, start, end, "end");
-    textarea.setSelectionRange(start + before.length, start + before.length + content.length);
-    textarea.focus();
-    dispatchInput(textarea);
+    if (selected.length === 0) {
+      const replacement = before + after;
+      replaceText(textarea, range.start, range.end, replacement, range.start + before.length, range.start + before.length);
+      return;
+    }
+
+    const replacement = before + selected + after;
+    replaceText(textarea, range.start, range.end, replacement, range.start + replacement.length, range.start + replacement.length);
   }
 
   function selectedLineRange(textarea) {
@@ -389,7 +444,22 @@ export const AURA_CLIENT_JS = String.raw`(() => {
     const lineStart = textarea.value.lastIndexOf("\n", Math.max(0, start - 1)) + 1;
     const nextBreak = textarea.value.indexOf("\n", end);
     const lineEnd = nextBreak === -1 ? textarea.value.length : nextBreak;
-    return { lineStart, lineEnd };
+    return { lineStart, lineEnd, start, end, hadSelection: start !== end };
+  }
+
+  function indentationAndContent(line) {
+    const match = /^(\s*)(.*)$/.exec(line);
+    return { indent: match?.[1] ?? "", content: match?.[2] ?? line };
+  }
+
+  function stripListMarker(line) {
+    const parts = indentationAndContent(line);
+    return parts.indent + parts.content.replace(/^(?:[-+*]\s+|\d+\.\s+)/, "");
+  }
+
+  function prefixLine(line, prefix) {
+    const parts = indentationAndContent(line);
+    return parts.indent + prefix + parts.content;
   }
 
   function transformSelectedLines(textarea, isActive, addPrefix, removePrefix) {
@@ -399,6 +469,7 @@ export const AURA_CLIENT_JS = String.raw`(() => {
     const meaningful = lines.filter((line) => line.trim().length > 0);
     const remove = meaningful.length > 0 && meaningful.every(isActive);
     let addIndex = 0;
+
     const replacement = meaningful.length === 0 && lines.length === 1
       ? addPrefix("", 0)
       : lines.map((line) => {
@@ -406,17 +477,28 @@ export const AURA_CLIENT_JS = String.raw`(() => {
           return remove ? removePrefix(line) : addPrefix(line, addIndex++);
         }).join("\n");
 
-    textarea.setRangeText(replacement, range.lineStart, range.lineEnd, "end");
-    textarea.setSelectionRange(range.lineStart, range.lineStart + replacement.length);
-    textarea.focus();
-    dispatchInput(textarea);
+    if (range.hadSelection) {
+      replaceText(textarea, range.lineStart, range.lineEnd, replacement, range.lineStart, range.lineStart + replacement.length);
+      return;
+    }
+
+    const oldLine = selected;
+    const oldCaretOffset = range.start - range.lineStart;
+    const oldIndent = /^\s*/.exec(oldLine)?.[0].length ?? 0;
+    const newIndent = /^\s*/.exec(replacement)?.[0].length ?? 0;
+    const oldMarker = /^(?:\s*)(?:#{1,6}\s+|>\s?|[-+*]\s+|\d+\.\s+)?/.exec(oldLine)?.[0].length ?? oldIndent;
+    const newMarker = /^(?:\s*)(?:#{1,6}\s+|>\s?|[-+*]\s+|\d+\.\s+)?/.exec(replacement)?.[0].length ?? newIndent;
+    let caret = range.lineStart + oldCaretOffset + (newMarker - oldMarker);
+    if (oldLine.trim().length === 0) caret = range.lineStart + newMarker;
+    caret = Math.max(range.lineStart, Math.min(range.lineStart + replacement.length, caret));
+    replaceText(textarea, range.lineStart, range.lineEnd, replacement, caret, caret);
   }
 
   function toggleQuote(textarea) {
     transformSelectedLines(
       textarea,
       (line) => /^\s*>\s?/.test(line) && !/^\s*>>/.test(line),
-      (line) => "> " + line,
+      (line) => prefixLine(line, "> "),
       (line) => line.replace(/^(\s*)>\s?/, "$1"),
     );
   }
@@ -425,7 +507,7 @@ export const AURA_CLIENT_JS = String.raw`(() => {
     transformSelectedLines(
       textarea,
       (line) => /^\s*[-+*]\s+/.test(line),
-      (line) => "- " + line,
+      (line) => prefixLine(stripListMarker(line), "- "),
       (line) => line.replace(/^(\s*)[-+*]\s+/, "$1"),
     );
   }
@@ -434,7 +516,7 @@ export const AURA_CLIENT_JS = String.raw`(() => {
     transformSelectedLines(
       textarea,
       (line) => /^\s*\d+\.\s+/.test(line),
-      (line, index) => String(index + 1) + ". " + line,
+      (line, index) => prefixLine(stripListMarker(line), String(index + 1) + ". "),
       (line) => line.replace(/^(\s*)\d+\.\s+/, "$1"),
     );
   }
@@ -443,42 +525,48 @@ export const AURA_CLIENT_JS = String.raw`(() => {
     transformSelectedLines(
       textarea,
       (line) => /^\s*#{1,6}\s+/.test(line),
-      (line) => "# " + line,
+      (line) => prefixLine(line, "# "),
       (line) => line.replace(/^(\s*)#{1,6}\s+/, "$1"),
     );
   }
 
   function insertCode(textarea) {
-    const start = textarea.selectionStart ?? textarea.value.length;
-    const end = textarea.selectionEnd ?? start;
-    const selected = textarea.value.slice(start, end);
+    const range = wordSelectionRange(textarea);
+    const selected = textarea.value.slice(range.start, range.end);
+
     if (selected.includes("\n")) {
-      toggleWrapSelection(textarea, FENCE + "\n", "\n" + FENCE, "code");
-    } else {
-      toggleWrapSelection(textarea, TICK, TICK, "code");
+      const before = textarea.value.slice(0, range.start);
+      const after = textarea.value.slice(range.end);
+      const leading = before.length > 0 && !before.endsWith("\n\n") ? (before.endsWith("\n") ? "\n" : "\n\n") : "";
+      const trailing = after.length > 0 && !after.startsWith("\n\n") ? (after.startsWith("\n") ? "\n" : "\n\n") : "";
+      const replacement = leading + FENCE + "\n" + selected + "\n" + FENCE + trailing;
+      replaceText(textarea, range.start, range.end, replacement, range.start + replacement.length, range.start + replacement.length);
+      return;
     }
+
+    toggleWrapSelection(textarea, TICK, TICK);
   }
 
   function insertLink(textarea) {
-    const start = textarea.selectionStart ?? textarea.value.length;
-    const end = textarea.selectionEnd ?? start;
-    const selected = textarea.value.slice(start, end);
+    const range = wordSelectionRange(textarea);
+    const selected = textarea.value.slice(range.start, range.end);
     const selectedHref = selected ? safeHref(selected.trim()) : null;
 
     if (selectedHref !== null) {
       const replacement = "[link text](" + selectedHref + ")";
-      textarea.setRangeText(replacement, start, end, "end");
-      setSelection(textarea, start + 1, start + 10);
+      replaceText(textarea, range.start, range.end, replacement, range.start + 1, range.start + 10);
       return;
     }
 
-    const label = selected || "link text";
-    const replacement = "[" + label + "](https://)";
-    textarea.setRangeText(replacement, start, end, "end");
-    const urlStart = start + label.length + 3;
-    textarea.setSelectionRange(urlStart, urlStart + 8);
-    textarea.focus();
-    dispatchInput(textarea);
+    if (selected.length > 0) {
+      const replacement = "[" + selected + "](https://)";
+      const urlStart = range.start + selected.length + 3;
+      replaceText(textarea, range.start, range.end, replacement, urlStart, urlStart + 8);
+      return;
+    }
+
+    const replacement = "[](https://)";
+    replaceText(textarea, range.start, range.end, replacement, range.start + 1, range.start + 1);
   }
 
   function insertHorizontalRule(textarea) {
@@ -486,21 +574,85 @@ export const AURA_CLIENT_JS = String.raw`(() => {
     const end = textarea.selectionEnd ?? start;
     const before = textarea.value.slice(0, start);
     const after = textarea.value.slice(end);
-    const prefix = before.length > 0 && !before.endsWith("\n") ? "\n" : "";
-    const suffix = after.length > 0 && !after.startsWith("\n") ? "\n" : "";
-    const insertion = prefix + "---" + suffix;
-    textarea.setRangeText(insertion, start, end, "end");
-    setSelection(textarea, start + insertion.length, start + insertion.length);
+    const leading = before.length === 0 ? "" : before.endsWith("\n\n") ? "" : before.endsWith("\n") ? "\n" : "\n\n";
+    const trailing = after.length === 0 ? "\n" : after.startsWith("\n\n") ? "" : after.startsWith("\n") ? "\n" : "\n\n";
+    const insertion = leading + "---" + trailing;
+    replaceText(textarea, start, end, insertion, start + insertion.length, start + insertion.length);
   }
 
-  function toolbarButton(label, title, handler) {
+  function currentLineBeforeCaret(textarea) {
+    const caret = textarea.selectionStart ?? 0;
+    const lineStart = textarea.value.lastIndexOf("\n", Math.max(0, caret - 1)) + 1;
+    return { caret, lineStart, text: textarea.value.slice(lineStart, caret) };
+  }
+
+  function continueMarkdownLine(textarea, event) {
+    if (event.key !== "Enter" || event.shiftKey || event.ctrlKey || event.metaKey || event.altKey) return false;
+    if ((textarea.selectionStart ?? 0) !== (textarea.selectionEnd ?? 0)) return false;
+
+    const current = currentLineBeforeCaret(textarea);
+    const bullet = /^(\s*)([-+*])\s+(.*)$/.exec(current.text);
+    const ordered = /^(\s*)(\d+)\.\s+(.*)$/.exec(current.text);
+    const quote = /^(\s*)>\s?(.*)$/.exec(current.text);
+
+    if (bullet !== null) {
+      event.preventDefault();
+      if (bullet[3].trim().length === 0) {
+        replaceText(textarea, current.lineStart, current.caret, bullet[1], current.lineStart + bullet[1].length, current.lineStart + bullet[1].length);
+      } else {
+        const insertion = "\n" + bullet[1] + bullet[2] + " ";
+        replaceText(textarea, current.caret, current.caret, insertion, current.caret + insertion.length, current.caret + insertion.length);
+      }
+      return true;
+    }
+
+    if (ordered !== null) {
+      event.preventDefault();
+      if (ordered[3].trim().length === 0) {
+        replaceText(textarea, current.lineStart, current.caret, ordered[1], current.lineStart + ordered[1].length, current.lineStart + ordered[1].length);
+      } else {
+        const insertion = "\n" + ordered[1] + String(Number(ordered[2]) + 1) + ". ";
+        replaceText(textarea, current.caret, current.caret, insertion, current.caret + insertion.length, current.caret + insertion.length);
+      }
+      return true;
+    }
+
+    if (quote !== null) {
+      event.preventDefault();
+      if (quote[2].trim().length === 0) {
+        replaceText(textarea, current.lineStart, current.caret, quote[1], current.lineStart + quote[1].length, current.lineStart + quote[1].length);
+      } else {
+        const insertion = "\n" + quote[1] + "> ";
+        replaceText(textarea, current.caret, current.caret, insertion, current.caret + insertion.length, current.caret + insertion.length);
+      }
+      return true;
+    }
+
+    return false;
+  }
+
+  function removeEmptyMarkerOnBackspace(textarea, event) {
+    if (event.key !== "Backspace" || event.ctrlKey || event.metaKey || event.altKey) return false;
+    if ((textarea.selectionStart ?? 0) !== (textarea.selectionEnd ?? 0)) return false;
+
+    const current = currentLineBeforeCaret(textarea);
+    const marker = /^(\s*)(?:[-+*]\s+|\d+\.\s+|>\s?)$/.exec(current.text);
+    if (marker === null) return false;
+
+    event.preventDefault();
+    replaceText(textarea, current.lineStart, current.caret, marker[1], current.lineStart + marker[1].length, current.lineStart + marker[1].length);
+    return true;
+  }
+
+  function toolbarButton(label, title, action) {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "markdown-editor-tool";
     button.textContent = label;
     button.title = title;
     button.setAttribute("aria-label", title);
-    button.addEventListener("click", handler);
+    button.dataset.editorAction = "true";
+    button.addEventListener("click", action);
     return button;
   }
 
@@ -509,6 +661,30 @@ export const AURA_CLIENT_JS = String.raw`(() => {
     separator.className = "markdown-editor-separator";
     separator.setAttribute("role", "separator");
     return separator;
+  }
+
+  function enhanceToolbarKeyboard(toolbar) {
+    const buttons = () => [...toolbar.querySelectorAll("button.markdown-editor-tool")];
+    const all = buttons();
+    all.forEach((button, index) => { button.tabIndex = index === 0 ? 0 : -1; });
+
+    toolbar.addEventListener("keydown", (event) => {
+      if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+      const current = event.target;
+      if (!(current instanceof HTMLButtonElement)) return;
+      const items = buttons();
+      const index = items.indexOf(current);
+      if (index === -1) return;
+
+      event.preventDefault();
+      let next = index;
+      if (event.key === "ArrowLeft") next = (index - 1 + items.length) % items.length;
+      if (event.key === "ArrowRight") next = (index + 1) % items.length;
+      if (event.key === "Home") next = 0;
+      if (event.key === "End") next = items.length - 1;
+      items.forEach((button, buttonIndex) => { button.tabIndex = buttonIndex === next ? 0 : -1; });
+      items[next]?.focus();
+    });
   }
 
   function enhanceMarkdownEditor(form) {
@@ -570,19 +746,37 @@ export const AURA_CLIENT_JS = String.raw`(() => {
     toolbar.className = "markdown-editor-toolbar";
     toolbar.setAttribute("role", "toolbar");
     toolbar.setAttribute("aria-label", "Markdown formatting");
+
+    let savedSelectionStart = textarea.selectionStart ?? 0;
+    let savedSelectionEnd = textarea.selectionEnd ?? savedSelectionStart;
+    function rememberSelection() {
+      savedSelectionStart = textarea.selectionStart ?? textarea.value.length;
+      savedSelectionEnd = textarea.selectionEnd ?? savedSelectionStart;
+    }
+    function restoreSelection() {
+      textarea.setSelectionRange(savedSelectionStart, savedSelectionEnd);
+    }
+    function action(handler) {
+      return () => {
+        restoreSelection();
+        handler();
+        rememberSelection();
+      };
+    }
+
     toolbar.append(
-      toolbarButton("H", "Heading", () => toggleHeading(textarea)),
-      toolbarButton("B", "Bold (Ctrl+B)", () => toggleWrapSelection(textarea, "**", "**", "bold text")),
-      toolbarButton("I", "Italic (Ctrl+I)", () => toggleWrapSelection(textarea, "*", "*", "italic text")),
-      toolbarButton("S", "Strikethrough", () => toggleWrapSelection(textarea, "~~", "~~", "struck text")),
+      toolbarButton("H", "Heading", action(() => toggleHeading(textarea))),
+      toolbarButton("B", "Bold (Ctrl+B)", action(() => toggleWrapSelection(textarea, "**", "**"))),
+      toolbarButton("I", "Italic (Ctrl+I)", action(() => toggleWrapSelection(textarea, "*", "*"))),
+      toolbarButton("S", "Strikethrough", action(() => toggleWrapSelection(textarea, "~~", "~~"))),
       toolbarSeparator(),
-      toolbarButton("Link", "Link (Ctrl+K)", () => insertLink(textarea)),
-      toolbarButton("Code", "Inline or fenced code", () => insertCode(textarea)),
-      toolbarButton("Quote", "Quote selected line(s)", () => toggleQuote(textarea)),
+      toolbarButton("Link", "Link (Ctrl+K)", action(() => insertLink(textarea))),
+      toolbarButton("Code", "Inline or fenced code", action(() => insertCode(textarea))),
+      toolbarButton("Quote", "Quote selected line(s)", action(() => toggleQuote(textarea))),
       toolbarSeparator(),
-      toolbarButton("• List", "Bulleted list", () => toggleBulletList(textarea)),
-      toolbarButton("1. List", "Numbered list", () => toggleOrderedList(textarea)),
-      toolbarButton("—", "Horizontal rule", () => insertHorizontalRule(textarea)),
+      toolbarButton("• List", "Bulleted list", action(() => toggleBulletList(textarea))),
+      toolbarButton("1. List", "Numbered list", action(() => toggleOrderedList(textarea))),
+      toolbarButton("—", "Horizontal rule", action(() => insertHorizontalRule(textarea))),
     );
 
     const help = form.querySelector(".markdown-help");
@@ -595,6 +789,7 @@ export const AURA_CLIENT_JS = String.raw`(() => {
         }),
       );
     }
+    enhanceToolbarKeyboard(toolbar);
 
     const writePane = document.createElement("div");
     writePane.className = "markdown-editor-write";
@@ -668,10 +863,12 @@ export const AURA_CLIENT_JS = String.raw`(() => {
         renderPreview();
       } else if (focusEditor) {
         textarea.focus();
+        rememberSelection();
       }
     }
 
     function updateStatus() {
+      rememberSelection();
       const bytes = encoder.encode(textarea.value).byteLength;
       const references = extractReferenceSequences(textarea.value);
       const tooLarge = Number.isFinite(maxBytes) && maxBytes > 0 && bytes > maxBytes;
@@ -708,16 +905,22 @@ export const AURA_CLIENT_JS = String.raw`(() => {
       }
     });
 
+    textarea.addEventListener("select", rememberSelection);
+    textarea.addEventListener("pointerup", rememberSelection);
+    textarea.addEventListener("keyup", rememberSelection);
     textarea.addEventListener("input", updateStatus);
     textarea.addEventListener("keydown", (event) => {
+      if (continueMarkdownLine(textarea, event)) return;
+      if (removeEmptyMarkerOnBackspace(textarea, event)) return;
+
       if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
       const key = event.key.toLowerCase();
       if (key === "b") {
         event.preventDefault();
-        toggleWrapSelection(textarea, "**", "**", "bold text");
+        toggleWrapSelection(textarea, "**", "**");
       } else if (key === "i") {
         event.preventDefault();
-        toggleWrapSelection(textarea, "*", "*", "italic text");
+        toggleWrapSelection(textarea, "*", "*");
       } else if (key === "k") {
         event.preventDefault();
         insertLink(textarea);
