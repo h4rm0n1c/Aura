@@ -87,6 +87,10 @@ test("web shell serves rules with restrictive browser headers, local JS and visi
   assert.match(html, /<script defer src="\/aura\.js"><\/script>/);
   assert.match(AURA_CSS, /body > header, \.board-strip, main, body > footer \{ font-size: 1rem; line-height: 1\.5; \}/);
   assert.match(AURA_CSS, /\.post-body \{[^}]*font-size: 1rem;[^}]*line-height: 1\.55;/);
+  assert.match(AURA_CSS, /\.markdown-editor-header \{[^}]*border-bottom: 1px solid var\(--line\);/);
+  assert.match(AURA_CSS, /\.markdown-editor-tab\[aria-selected="true"\] \{[^}]*var\(--accent-line\);/);
+  assert.match(AURA_CSS, /\.markdown-editor-toolbar \{[^}]*overflow-x: auto;/);
+  assert.match(AURA_CSS, /\.composer \.markdown-editor-write textarea \{[^}]*min-height: 14rem;/);
 
   const scriptResponse = await handleAuraWebRequest(
     new Request("https://aura.example/aura.js"),
@@ -102,10 +106,13 @@ test("web shell serves rules with restrictive browser headers, local JS and visi
   assert.match(script, /setRangeText/);
   assert.match(script, /scrollIntoView/);
   assert.match(script, /renderMarkdownInto/);
+  assert.match(script, /extractReferenceSequences/);
   assert.match(script, /document\.createTextNode/);
   assert.match(script, /TextEncoder/);
   assert.match(script, /setCustomValidity/);
-  assert.match(script, /editor-preview-toggle/);
+  assert.match(script, /markdown-editor-tab/);
+  assert.match(script, /requestAnimationFrame/);
+  assert.match(script, /aria-selected/);
   assert.match(script, /Ctrl\+B/);
   assert.doesNotMatch(script, /innerHTML/);
   assert.doesNotMatch(script, /fetch\(/);
