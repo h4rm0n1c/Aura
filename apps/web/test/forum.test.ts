@@ -16,11 +16,15 @@ import { handleForumRequest } from "../src/forum/routes.ts";
 import type { D1DatabaseLike, D1PreparedStatementLike, D1ResultLike } from "../src/db/d1.ts";
 import { AURA_CSS } from "../src/ui.ts";
 
-const migration1 = readFileSync(new URL("../../../db/migrations/0001_initial.sql", import.meta.url), "utf8");
-const migration2 = readFileSync(new URL("../../../db/migrations/0002_human_membership_and_board_staff.sql", import.meta.url), "utf8");
-const migration3 = readFileSync(new URL("../../../db/migrations/0003_unbound_member_invites.sql", import.meta.url), "utf8");
-const migration4 = readFileSync(new URL("../../../db/migrations/0004_board_thread_lifecycle.sql", import.meta.url), "utf8");
-const migration5 = readFileSync(new URL("../../../db/migrations/0005_post_edit_history.sql", import.meta.url), "utf8");
+const migrationNames = [
+  "0001_initial.sql",
+  "0002_human_membership_and_board_staff.sql",
+  "0003_unbound_member_invites.sql",
+  "0004_board_thread_lifecycle.sql",
+  "0005_post_edit_history.sql",
+  "0006_post_references.sql",
+] as const;
+const migrations = migrationNames.map((name) => readFileSync(new URL(`../../../db/migrations/${name}`, import.meta.url), "utf8"));
 
 const ADMIN = "hum_AAAAAAAAAAAAAAAAAAAAAA";
 const MEMBER = "hum_BBBBBBBBBBBBBBBBBBBBBB";
@@ -69,11 +73,7 @@ class DatabaseAdapter implements D1DatabaseLike {
 
   constructor() {
     this.sqlite.exec("PRAGMA foreign_keys = ON;");
-    this.sqlite.exec(migration1);
-    this.sqlite.exec(migration2);
-    this.sqlite.exec(migration3);
-    this.sqlite.exec(migration4);
-    this.sqlite.exec(migration5);
+    for (const migration of migrations) this.sqlite.exec(migration);
   }
 
   prepare(query: string): D1PreparedStatementLike {
@@ -253,7 +253,7 @@ test("per-board capacity drops old threads into a durable read-only archive", as
   db.close();
 });
 
-test("human creates a thread and durable parented reply", async () => {
+test("human quote reference creates forward link and backlink relationship", async () => {
   const db = new DatabaseAdapter();
   const member = seedHuman(db, MEMBER, "member", "member", "Human User");
   seedBoards(db);
@@ -261,19 +261,22 @@ test("human creates a thread and durable parented reply", async () => {
 
   const reply = await createHumanReply(db, member, {
     threadId: created.threadId,
-    body: "Follow-up information",
-    parentPostId: created.postId,
+    body: ">>1\nFollow-up information",
   }, 101);
   assert.equal(reply.ok, true);
+  if (!reply.ok) return db.close();
 
   const thread = await getForumThread(db, member, created.threadId);
   assert.equal(thread.ok, true);
   if (!thread.ok) return db.close();
   assert.equal(thread.value.posts.length, 2);
-  assert.equal(thread.value.posts[0].sequence, 1);
-  assert.equal(thread.value.posts[1].sequence, 2);
-  assert.equal(thread.value.posts[1].parentPostId, created.postId);
-  assert.equal(thread.value.posts[1].author.displayName, "Human User");
+  const op = thread.value.posts[0];
+  const response = thread.value.posts[1];
+  assert.equal(op.sequence, 1);
+  assert.equal(response.sequence, 2);
+  assert.equal(response.author.displayName, "Human User");
+  assert.deepEqual(response.references.map((reference) => [reference.postId, reference.sequence, reference.referencedAt]), [[created.postId, 1, 101]]);
+  assert.deepEqual(op.referencedBy.map((reference) => [reference.postId, reference.sequence, reference.referencedAt]), [[reply.value.postId, 2, 101]]);
   assert.equal(thread.value.thread.replyCount, 1);
   db.close();
 });
@@ -292,7 +295,7 @@ test("locked threads reject human replies", async () => {
   db.close();
 });
 
-test("thread HTML escapes board content, shows staff capcodes, links references and shows agent provenance", async () => {
+test("thread HTML escapes board content, shows staff capcodes, links references, backlinks and agent provenance", async () => {
   const db = new DatabaseAdapter();
   const admin = seedHuman(db, ADMIN, "admin", "admin", "Site Admin");
   const member = seedHuman(db, MEMBER, "member", "member", "Board Mod");
@@ -305,9 +308,9 @@ test("thread HTML escapes board content, shows staff capcodes, links references 
   const modReply = await createHumanReply(db, member, {
     threadId: created.threadId,
     body: ">>1\nBoard moderator reply",
-    parentPostId: created.postId,
   }, 101);
   assert.equal(modReply.ok, true);
+  if (!modReply.ok) return db.close();
 
   db.sqlite.prepare(`INSERT INTO agents
     (id, owner_human_id, name, model, client, status, created_at, updated_at)
@@ -340,12 +343,13 @@ test("thread HTML escapes board content, shows staff capcodes, links references 
   assert.match(html, /model Model X · client Client Y/);
   assert.match(html, /class="post-number"[^>]*>No\.1<\/a>/);
   assert.match(html, new RegExp(`class="post-ref" href="#p-${created.postId}">&gt;&gt;1</a>`));
+  assert.match(html, new RegExp(`class="post-backlink" href="#p-${modReply.value.postId}">&gt;&gt;2</a>`));
   assert.doesNotMatch(html, /class="post-foot"/);
   assert.match(html, new RegExp(`reply-to/${agentPost}`));
   db.close();
 });
 
-test("forum HTML forms create a thread and reply with CSRF and PRG redirects", async () => {
+test("forum HTML forms use Reply only to prefill quote syntax and persist backlinks", async () => {
   const db = new DatabaseAdapter();
   const admin = seedHuman(db, ADMIN, "admin", "admin", "Admin User");
   seedBoards(db);
@@ -411,15 +415,15 @@ test("forum HTML forms create a thread and reply with CSRF and PRG redirects", a
   assert(targetedGet);
   assert.equal(targetedGet.status, 200);
   const targetedHtml = await targetedGet.text();
-  assert.match(targetedHtml, /Replying to &gt;&gt;1/);
+  assert.match(targetedHtml, /Quoting &gt;&gt;1/);
   assert.match(targetedHtml, /<textarea id="reply-body" name="body" rows="8" required>&gt;&gt;1\n<\/textarea>/);
-  assert.equal((targetedHtml.match(/name="parent_post_id"/g) ?? []).length, 1);
+  assert.doesNotMatch(targetedHtml, /name="parent_post_id"/);
 
   const replyPost = await handleForumRequest(
     new Request(`https://aura.example/t/${threadId}/reply`, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded", Origin: "https://aura.example" },
-      body: new URLSearchParams({ csrf: replyCsrf, body: "Second post" }).toString(),
+      body: new URLSearchParams({ csrf: replyCsrf, body: ">>1\nSecond post" }).toString(),
     }),
     db,
     csrfKey,
@@ -428,7 +432,24 @@ test("forum HTML forms create a thread and reply with CSRF and PRG redirects", a
   );
   assert(replyPost);
   assert.equal(replyPost.status, 303);
-  assert.match(replyPost.headers.get("location") ?? "", new RegExp(`^/t/${threadId}#p-pst_`));
+  const replyLocation = replyPost.headers.get("location") ?? "";
+  assert.match(replyLocation, new RegExp(`^/t/${threadId}#p-pst_`));
+  const secondPostId = /#p-(pst_[A-Za-z0-9_-]{22})$/.exec(replyLocation)?.[1];
+  assert(secondPostId);
   assert.equal((db.sqlite.prepare("SELECT count(*) AS n FROM posts WHERE thread_id=?").get(threadId) as { n: number }).n, 2);
+  const relation = db.sqlite.prepare(`SELECT source_post_id, target_post_id FROM post_references
+    WHERE thread_id=?`).get(threadId) as { source_post_id: string; target_post_id: string };
+  assert.deepEqual({ ...relation }, { source_post_id: secondPostId, target_post_id: firstPostId });
+
+  const rendered = await handleForumRequest(
+    new Request(`https://aura.example/t/${threadId}`),
+    db,
+    csrfKey,
+    admin,
+    new URL(`https://aura.example/t/${threadId}`),
+  );
+  assert(rendered);
+  const renderedHtml = await rendered.text();
+  assert.match(renderedHtml, new RegExp(`class="post-backlink" href="#p-${secondPostId}">&gt;&gt;2</a>`));
   db.close();
 });
