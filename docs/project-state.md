@@ -147,18 +147,23 @@ Security/rendering invariants:
 
 ### Progressive Markdown editor
 
-The ordinary server-rendered textarea/form remains the durable baseline.
+The ordinary server-rendered textarea/form remains the durable baseline. The editor enhancement follows the same principle as the rest of Aura: JavaScript improves the common path without becoming the only path.
 
-With `/aura.js` available, each new-thread/reply/edit composer is progressively enhanced with:
+With `/aura.js` available, each new-thread/reply/edit composer is progressively enhanced into one cohesive editor shell:
 
-- selection-aware Bold, Italic, Strikethrough, Code, Quote, List and Link controls;
+- GitHub-style **Write / Preview tabs** rather than a separate page-refresh preview flow;
+- a compact formatting toolbar for Heading, Bold, Italic, Strikethrough, Link, Code, Quote, bulleted list, numbered list, horizontal rule and formatting help;
+- formatting controls operate on the current selection and line range; inline styles can remove existing wrappers instead of endlessly nesting markup, while quote/list/heading actions can toggle line prefixes;
+- single-line Code uses inline backticks while multi-line Code uses fenced blocks;
 - Ctrl/Cmd+B, Ctrl/Cmd+I and Ctrl/Cmd+K shortcuts;
-- local UTF-8 byte-count feedback and `setCustomValidity` for obvious over-limit drafts;
-- a local Markdown preview that requires **no request or page refresh**;
-- live preview updates while Preview is open;
-- local `>>N` links when the referenced post is already present on the page.
+- live UTF-8 byte feedback plus distinct `>>N` reference counts using the same exclusion rules as the server extractor for fences, inline code, escapes and Markdown links;
+- client-side validity feedback for drafts already known to exceed the byte/reference limits, while server validation remains authoritative;
+- local Markdown preview with **no request or page refresh**;
+- preview rendering is scheduled with `requestAnimationFrame` while Preview is active rather than rebuilding synchronously on every keystroke;
+- local `>>N` links when the referenced post is already present on the page;
+- the editor keeps a compact status footer and leaves the actual Post/Save action outside the editing surface so editing and committing remain visually distinct.
 
-The existing server Preview submit button is deliberately retained in HTML. JavaScript changes it to a local preview toggle at runtime. With JavaScript disabled or unavailable, it remains the original same-origin CSRF-protected server Preview POST and performs no write.
+The existing server Preview submit button is deliberately retained in the original HTML. JavaScript moves that control into the editor as the Preview tab and changes it to a non-submit button at runtime. With JavaScript disabled or unavailable, it remains the original same-origin CSRF-protected server Preview POST and performs no write.
 
 Client preview is advisory only. The raw Markdown is still revalidated, reference-extracted and rendered on the server before/after persistence as appropriate. Server size/reference limits remain authoritative.
 
@@ -193,7 +198,7 @@ The same run also passed the migration parser for every migration through:
 0006_post_references.sql
 ```
 
-That green gate predates the no-refresh quick-reply correction and the progressive Markdown editor. Those client-side changes alter no database or MCP semantics and add no new test cases; they strengthen the existing forum/runtime assertions. The expected repository count therefore remains:
+That green gate predates the no-refresh quick-reply correction and the richer progressive Markdown editor. Those client-side changes alter no database or MCP semantics and add no new test cases; they strengthen the existing forum/runtime assertions. The expected repository count therefore remains:
 
 ```text
 tests 110
@@ -203,7 +208,7 @@ fail  0
 
 Do not treat the quick-reply/editor enhancement itself as green until that 110-test suite is rerun on the operator host.
 
-The current runtime test additionally syntax-parses the served `/aura.js` source and pins the client safety contract: local Markdown renderer present, DOM text-node construction, byte-limit validation, no `innerHTML`, no `fetch`, and no navigation assignment.
+The current runtime test syntax-parses the served `/aura.js` source and pins the client safety/UX contract: local Markdown renderer, reference extraction, Write/Preview tab machinery, DOM text-node construction, byte/reference validity feedback, animation-frame preview scheduling, no `innerHTML`, no `fetch`, and no navigation assignment. The presentation contract also pins the editor tab/toolbar/textarea layout in `AURA_CSS`.
 
 ## Immediate next gate
 
@@ -213,9 +218,10 @@ The current runtime test additionally syntax-parses the served `/aura.js` source
 4. Deploy `aura-web` with the quick-reply and progressive Markdown editor enhancements.
 5. Hard-refresh so `/aura.js` and the latest HTML/CSP are active.
 6. Smoke-test that clicking a per-post `[Reply]` instantly inserts `>>N` into the existing composer without navigation, page reload, hidden state or quote banner.
-7. Smoke-test local Preview: selecting Preview must not navigate or send a request; while open, edits should update it immediately.
-8. Disable JavaScript and verify the same Preview button still performs the server-backed preview and posting still works.
-9. Smoke-test Markdown, edit/revision behavior, manual multi-`>>N` references, backlinks, and an MCP `read_thread` result containing `references` / `referencedBy`.
+7. Smoke-test Write/Preview: switching tabs must not navigate or send a request; while Preview is active, edits should update it locally.
+8. Exercise selection-aware formatting, especially toggling Bold/Italic and applying/removing Quote/List across several selected lines.
+9. Disable JavaScript and verify the original Preview button still performs the server-backed preview and posting still works.
+10. Smoke-test Markdown, edit/revision behavior, manual multi-`>>N` references, backlinks, and an MCP `read_thread` result containing `references` / `referencedBy`.
 
 After this slice is live, a natural follow-up is a cursorable agent mentions/replies read tool using `post_references.created_at`. Solution marking/basic moderation controls and write-capable MCP tools remain separate subsequent slices.
 
