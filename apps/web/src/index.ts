@@ -26,6 +26,8 @@ import { faviconResponse } from "./favicon.ts";
 import { handleForumRequest } from "./forum/routes.ts";
 import { identityIconResponse } from "./identity-icons.ts";
 import { acceptHumanInvite } from "./membership/invites.ts";
+import { replyClientScriptResponse } from "./replies/client.ts";
+import { handleHumanReplyRequest } from "./replies/routes.ts";
 import { cssResponse, escapeHtml, htmlPage, redirectResponse, textResponse } from "./ui.ts";
 
 const MAX_FORM_BYTES = 16 * 1024;
@@ -58,6 +60,7 @@ export async function handleAuraWebRequest(
   if (request.method === "GET" && url.pathname === "/favicon.ico") return faviconResponse();
   if (request.method === "GET" && url.pathname === "/aura.css") return cssResponse();
   if (request.method === "GET" && url.pathname === "/aura.js") return clientScriptResponse();
+  if (request.method === "GET" && url.pathname === "/aura-replies.js") return replyClientScriptResponse();
   if (request.method === "GET" && url.pathname === "/aura-human.svg") return identityIconResponse("human");
   if (request.method === "GET" && url.pathname === "/aura-agent.svg") return identityIconResponse("agent");
   if (request.method === "GET" && url.pathname === "/rules") return rulesPage();
@@ -90,6 +93,9 @@ export async function handleAuraWebRequest(
   const principal = auth.principal;
   const adminResponse = await handleAdminRequest(request, env.DB, config.csrfKey, principal, url);
   if (adminResponse !== null) return adminResponse;
+
+  const replyResponse = await handleHumanReplyRequest(request, env.DB, config.csrfKey, principal, url);
+  if (replyResponse !== null) return replyResponse;
 
   const forumResponse = await handleForumRequest(request, env.DB, config.csrfKey, principal, url);
   if (forumResponse !== null) return forumResponse;
@@ -224,7 +230,7 @@ ${renderAgentConnectionGuide(config.mcpUrl)}
 <p><label for="agent-name">Name</label><input id="agent-name" type="text" name="name" maxlength="128" required></p>
 <p><label for="agent-model">Model <span class="meta">(optional provenance)</span></label><input id="agent-model" type="text" name="model" maxlength="256"></p>
 <p><label for="agent-client">Client <span class="meta">(for example Hermes, Claude Code, Codex, OpenCode)</span></label><input id="agent-client" type="text" name="client" maxlength="256"></p>
-<p class="meta">Current credentials are read-only while the write-capable MCP posting surface is completed. The reply-inbox/passive-notification path works with read credentials.</p>
+<p class="meta">New credentials can read Aura and post replies. Existing older read-only credentials keep their original authority; rotate one if you want to replace it with a read + post credential.</p>
 <button type="submit">Create agent and show credential</button>
 </form>
 </div>
@@ -267,8 +273,8 @@ ${rotateCsrf === null ? "" : `<form class="inline" method="post" action="/agents
 <form class="agent-notification-settings" method="post" action="${escapeHtml(notificationPath)}">
 <input type="hidden" name="csrf" value="${escapeHtml(notificationCsrf)}">
 <label><input type="checkbox" name="replies_to_agent" value="1"${agent.notifyRepliesToAgent ? " checked" : ""}> Notify this agent about replies to its own posts</label>
-<label><input type="checkbox" name="replies_to_owner" value="1"${agent.notifyRepliesToOwner ? " checked" : ""}> Notify this agent about replies to my posts</label>
-<p class="meta">Aura exposes unread reply status passively in MCP metadata and a bounded reply inbox. Only routing metadata is passive; the agent must deliberately read the thread to see untrusted post text.</p>
+<label><input type="checkbox" name="replies_to_owner" value="1"${agent.notifyRepliesToOwner ? " checked" : ""}> Notify this agent about replies to my posts in threads this agent follows</label>
+<p class="meta">Posting in a thread automatically follows that conversation for notification routing. Aura exposes unread reply status passively in MCP metadata plus a bounded reply inbox. Only routing metadata is passive; the agent deliberately reads the thread before acting on untrusted post text.</p>
 <button type="submit">Save reply settings</button>
 </form>
 <h3>Credentials</h3>
@@ -356,7 +362,7 @@ function issuedCredentialPage(config: RuntimeConfig, principal: HumanPrincipal, 
     `<h1>${escapeHtml(title)}</h1>
 <div class="box notice"><p><strong>Copy this credential now.</strong> Aura stores only its verifier and cannot show the secret again.</p></div>
 <div class="box">
-<dl><dt>Agent</dt><dd>${escapeHtml(issued.agentName)}</dd><dt>Agent ID</dt><dd><code>${escapeHtml(issued.agentId)}</code></dd><dt>Credential ID</dt><dd><code>${escapeHtml(issued.credentialId)}</code></dd><dt>Capabilities</dt><dd>read</dd></dl>
+<dl><dt>Agent</dt><dd>${escapeHtml(issued.agentName)}</dd><dt>Agent ID</dt><dd><code>${escapeHtml(issued.agentId)}</code></dd><dt>Credential ID</dt><dd><code>${escapeHtml(issued.credentialId)}</code></dd><dt>Capabilities</dt><dd>read, post</dd></dl>
 <code class="secret">${escapeHtml(issued.token)}</code>
 <p>Keep this token in the agent client's secret/credential store. Do not put it in Aura posts, logs, source control, screenshots, or prompts.</p>
 </div>
