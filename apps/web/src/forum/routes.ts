@@ -14,6 +14,7 @@ import {
   isBoardStaffRole,
   type BoardStaffRole,
 } from "../../../../packages/core/src/domain/authorization.ts";
+import { extractPostReferenceSequences } from "../../../../packages/core/src/domain/post-references.ts";
 import { MCP_LIMITS } from "../../../../packages/core/src/mcp/schemas.ts";
 import type { D1DatabaseLike } from "../db/d1.ts";
 import { escapeHtml, htmlPage, redirectResponse, textResponse } from "../ui.ts";
@@ -559,7 +560,10 @@ function validPreviewTitle(value: string | null): value is string {
 }
 
 function validMarkdownBody(value: string | null): value is string {
-  return value !== null && value.trim().length > 0 && new TextEncoder().encode(value).byteLength <= MCP_LIMITS.postBytes;
+  return value !== null &&
+    value.trim().length > 0 &&
+    new TextEncoder().encode(value).byteLength <= MCP_LIMITS.postBytes &&
+    extractPostReferenceSequences(value).length <= MCP_LIMITS.postReferences;
 }
 
 function makeExcerpt(body: string): string {
