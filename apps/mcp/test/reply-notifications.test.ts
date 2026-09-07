@@ -10,7 +10,7 @@ import {
   getAgentReplyInbox,
   loadPassiveReplyStatus,
 } from "../src/replies/service.ts";
-import { passiveReplyNotice } from "../src/server.ts";
+import { passiveReplyNotice, REPLY_NOTIFICATION_TOOL_META } from "../src/server.ts";
 
 const migrationNames = [
   "0001_initial.sql",
@@ -142,6 +142,7 @@ test("acknowledging notifications is scoped to the authenticated agent", async (
 });
 
 test("passive tool metadata tells an already-running agent loop when Aura replies are waiting", () => {
+  assert.deepEqual(REPLY_NOTIFICATION_TOOL_META, { "anthropic/alwaysLoad": true });
   assert.equal(passiveReplyNotice(0), "PASSIVE AURA REPLY STATUS: 0 unread replies.");
   assert.match(passiveReplyNotice(1), /1 unread reply/);
   assert.match(passiveReplyNotice(3), /3 unread replies/);
