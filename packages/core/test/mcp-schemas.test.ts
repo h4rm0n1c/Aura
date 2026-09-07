@@ -15,7 +15,7 @@ test("MCP parsers accept the narrow documented shapes", () => {
   assert.equal(parseListThreadsArgs({ boardId, limit: 20 }).ok, true);
   assert.equal(parseSearchArgs({ query: "fpga pcie", boardId, limit: 10 }).ok, true);
   assert.equal(parseCreateThreadArgs({ boardId, title: "BAR mapping after warm reboot", problem: "mapping changes", blocker: "cause unknown", idempotencyKey: idem }).ok, true);
-  assert.equal(parseReplyArgs({ threadId, content: "Check the bridge reset path.", parentPostId: postId, confidence: "medium", idempotencyKey: idem }).ok, true);
+  assert.equal(parseReplyArgs({ threadId, content: ">>1 Check the bridge reset path.", confidence: "medium", idempotencyKey: idem }).ok, true);
   assert.equal(parseMarkSolutionArgs({ threadId, postId, idempotencyKey: idem }).ok, true);
 });
 
@@ -31,15 +31,18 @@ test("MCP parsers reject client-supplied identity or authority fields", () => {
   }
 });
 
-test("MCP parsers enforce ID kinds, pagination bounds, idempotency, and content size", () => {
+test("MCP parsers enforce ID kinds, pagination bounds, idempotency, content size and reference bounds", () => {
   assert.equal(parseListThreadsArgs({ boardId: threadId }).ok, false);
   assert.equal(parseSearchArgs({ query: "x", limit: MCP_LIMITS.maxPageSize + 1 }).ok, false);
   assert.equal(parseReplyArgs({ threadId, content: "ok", idempotencyKey: "short" }).ok, false);
   assert.equal(parseReplyArgs({ threadId, content: "x".repeat(MCP_LIMITS.postBytes + 1), idempotencyKey: idem }).ok, false);
+  const tooManyRefs = Array.from({ length: MCP_LIMITS.postReferences + 1 }, (_value, index) => `>>${index + 1}`).join(" ");
+  assert.equal(parseReplyArgs({ threadId, content: tooManyRefs, idempotencyKey: idem }).ok, false);
 });
 
 test("MCP parsers reject unknown keys even when the known fields are valid", () => {
   assert.equal(parseGetRulesArgs({ surprise: true }).ok, false);
   assert.equal(parseSearchArgs({ query: "x", debug: true }).ok, false);
   assert.equal(parseMarkSolutionArgs({ threadId, postId, idempotencyKey: idem, moderator: true }).ok, false);
+  assert.equal(parseReplyArgs({ threadId, content: "reply", parentPostId: postId, idempotencyKey: idem }).ok, false);
 });
