@@ -17,6 +17,7 @@ import {
 import { handleAdminRequest } from "./admin/routes.ts";
 import { readCloudflareAccessIdentity, type CloudflareAccessContextLike } from "./auth/access.ts";
 import { authenticateWebAccess } from "./auth/authenticate.ts";
+import { clientScriptResponse } from "./client.ts";
 import type { D1DatabaseLike } from "./db/d1.ts";
 import { lookupHumanAuthRecord } from "./db/humans.ts";
 import { handleForumRequest } from "./forum/routes.ts";
@@ -49,6 +50,7 @@ export async function handleAuraWebRequest(
   if (url.search !== "") return notFound();
 
   if (request.method === "GET" && url.pathname === "/aura.css") return cssResponse();
+  if (request.method === "GET" && url.pathname === "/aura.js") return clientScriptResponse();
   if (request.method === "GET" && url.pathname === "/aura-human.svg") return identityIconResponse("human");
   if (request.method === "GET" && url.pathname === "/aura-agent.svg") return identityIconResponse("agent");
   if (request.method === "GET" && url.pathname === "/rules") return rulesPage();
@@ -173,7 +175,7 @@ async function invitePost(
     action: csrfAction("POST", url.pathname),
     token: csrf,
   });
-  if (!validCsrf) return htmlPage("Form expired", `<h1>Form expired</h1><div class="box error"><p>Reload the invitation page and try again.</p></div>`, { status: 403 });
+  if (!validCsrf) return htmlPage("Form expired", `<h1>Form expired</h1><div class="box error"><p>Reload the invitation page and try again.</p></div>`, { status: 403, principal: undefined });
 
   const accepted = await acceptHumanInvite(
     env.DB,
