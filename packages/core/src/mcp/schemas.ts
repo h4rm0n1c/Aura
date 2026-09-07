@@ -266,20 +266,24 @@ export function parseMarkSolutionArgs(input: unknown): ValidationResult<MarkSolu
   if (!isRecord(input) || !onlyKeys(input, ["threadId", "postId", "idempotencyKey"])) {
     return invalid();
   }
-  if (!isAuraId("thread", input.threadId) || !isAuraId("post", input.postId)) return invalid();
+  if (!isAuraId("thread", input.threadId) || !isAuraId("post", input.postId)) {
+    return invalid();
+  }
   const idempotencyKey = parseIdempotencyKey(input.idempotencyKey);
-  if (idempotencyKey === null) return invalid();
-  return ok({ threadId: input.threadId, postId: input.postId, idempotencyKey });
+  return idempotencyKey === null
+    ? invalid()
+    : ok({ threadId: input.threadId, postId: input.postId, idempotencyKey });
 }
 
 function parsePageObject<T>(
   input: unknown,
-  requiredKeys: readonly string[],
+  required: readonly string[],
   build: (record: Record<string, unknown>, page: PageRequest) => T | null,
 ): ValidationResult<T> {
-  const allowedKeys = [...requiredKeys, "cursor", "limit"];
-  if (!isRecord(input) || !onlyKeys(input, allowedKeys)) return invalid();
-  for (const key of requiredKeys) {
+  if (!isRecord(input) || !onlyKeys(input, [...required, "cursor", "limit"])) {
+    return invalid();
+  }
+  for (const key of required) {
     if (!(key in input)) return invalid();
   }
   const page = parsePage(input);
@@ -288,21 +292,43 @@ function parsePageObject<T>(
   return value === null ? invalid() : ok(value);
 }
 
+function exactObject<T>(
+  input: unknown,
+  keys: readonly string[],
+  build: () => T,
+): ValidationResult<T> {
+  return isRecord(input) && onlyKeys(input, keys) ? ok(build()) : invalid();
+}
+
 function parsePage(record: Record<string, unknown>): PageRequest | null {
-  const cursor = record.cursor;
-  const limit = record.limit;
+  const result: { cursor?: string; limit?: number } = {};
+  if (record.cursor !== undefined) {
+    const cursor = boundedText(record.cursor, 1, MCP_LIMITS.cursorChars);
+    if (cursor === null) return null;
+    result.cursor = cursor;
+  }
+  if (record.limit !== undefined) {
+    if (
+      !Number.isSafeInteger(record.limit) ||
+      (record.limit as number) < 1 ||
+      (record.limit as number) > MCP_LIMITS.maxPageSize
+    ) {
+      return null;
+    }
+    result.limit = record.limit as number;
+  }
+  return result;
+}
+
+function parseIdempotencyKey(value: unknown): string | null {
   if (
-    cursor !== undefined &&
-    (typeof cursor !== "string" || cursor.length < 1 || cursor.length > MCP_LIMITS.cursorChars)
-  ) return null;
-  if (
-    limit !== undefined &&
-    (!Number.isSafeInteger(limit) || (limit as number) < 1 || (limit as number) > MCP_LIMITS.maxPageSize)
-  ) return null;
-  return {
-    ...(cursor === undefined ? {} : { cursor }),
-    ...(limit === undefined ? {} : { limit: limit as number }),
-  };
+    typeof value !== "string" ||
+    value.length < 16 ||
+    value.length > MCP_LIMITS.idempotencyKeyChars
+  ) {
+    return null;
+  }
+  return /^[A-Za-z0-9._~-]+$/.test(value) ? value : null;
 }
 
 function parseConfidence(value: unknown): Confidence | undefined | null {
@@ -310,56 +336,39 @@ function parseConfidence(value: unknown): Confidence | undefined | null {
   return value === "low" || value === "medium" || value === "high" ? value : null;
 }
 
-function parseIdempotencyKey(value: unknown): string | null {
-  if (
-    typeof value !== "string" ||
-    value.length < 16 ||
-    value.length > MCP_LIMITS.idempotencyKeyChars ||
-    !/^[A-Za-z0-9._~-]+$/.test(value)
-  ) return null;
-  return value;
-}
-
-function optionalText(value: unknown, required: boolean): string | undefined | null {
-  if (value === undefined && !required) return undefined;
+function optionalText(
+  value: unknown,
+  required: boolean,
+): string | undefined | null {
+  if (value === undefined) return required ? null : undefined;
   if (typeof value !== "string") return null;
-  const trimmed = value.trim();
-  if (required && trimmed.length < 1) return null;
+  if (required && value.trim().length === 0) return null;
   return value;
 }
 
 function boundedText(value: unknown, min: number, max: number): string | null {
-  if (typeof value !== "string") return null;
-  const trimmed = value.trim();
-  return trimmed.length >= min && trimmed.length <= max ? trimmed : null;
+  return typeof value === "string" && value.length >= min && value.length <= max
+    ? value
+    : null;
 }
 
 function utf8Bytes(value: string): number {
   return new TextEncoder().encode(value).byteLength;
 }
 
-function exactObject<T>(
-  input: unknown,
-  keys: readonly string[],
-  build: (record: Record<string, unknown>) => T,
-): ValidationResult<T> {
-  if (!isRecord(input) || !onlyKeys(input, keys)) return invalid();
-  return ok(build(input));
-}
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function onlyKeys(record: Record<string, unknown>, keys: readonly string[]): boolean {
-  const allowed = new Set(keys);
-  return Object.keys(record).every((key) => allowed.has(key));
+function onlyKeys(record: Record<string, unknown>, allowed: readonly string[]): boolean {
+  const set = new Set(allowed);
+  return Object.keys(record).every((key) => set.has(key));
 }
 
 function ok<T>(value: T): ValidationResult<T> {
-  return { ok: true, value: Object.freeze(value) };
+  return { ok: true, value: Object.freeze(value) as T };
 }
 
-function invalid(): ValidationResult<never> {
+function invalid<T>(): ValidationResult<T> {
   return { ok: false, error: domainError("validation_error") };
 }
