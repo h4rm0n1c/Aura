@@ -54,6 +54,18 @@ body > header { border-bottom: 1px solid var(--line-strong); background: #000; }
 nav { display: flex; gap: .8rem; flex-wrap: wrap; }
 nav a { text-decoration: none; border-bottom: 1px solid transparent; }
 nav a:hover { border-bottom-color: var(--line-strong); }
+.primary-nav { align-items: center; }
+.reply-nav { position: relative; display: inline-flex; align-items: center; gap: .18rem; }
+.reply-nav-link { display: inline-flex; align-items: center; gap: .28rem; }
+.reply-count { min-width: 1.35rem; padding: 0 .3rem; border-radius: 999px; background: var(--accent-line); color: #000; font-size: .74rem; font-weight: 800; line-height: 1.35rem; text-align: center; font-variant-numeric: tabular-nums; }
+.reply-toggle { border: 0; background: transparent; color: var(--muted); padding: .05rem .18rem; line-height: 1; }
+.reply-toggle:hover { color: var(--text); }
+.reply-menu { position: absolute; z-index: 20; top: calc(100% + .45rem); left: 0; width: min(30rem, 78vw); border: 1px solid var(--line-strong); background: #080808; box-shadow: 0 .45rem 1.3rem rgba(0,0,0,.7); }
+.reply-menu-item, .reply-menu-all, .reply-menu-empty { display: block; padding: .48rem .58rem; border-bottom: 1px solid var(--line); line-height: 1.35; }
+.reply-menu-item { color: var(--text); text-decoration: none; }
+.reply-menu-item:hover { background: var(--panel-soft); border-bottom-color: var(--line); }
+.reply-menu-empty { color: var(--muted); }
+.reply-menu-all { border-bottom: 0; font-weight: 700; text-decoration: none; }
 .identity { margin-left: auto; color: var(--muted); font-size: .95rem; }
 .board-strip { display: block; border-bottom: 1px solid var(--line); background: #0a0a0a; }
 .board-strip-inner { max-width: var(--shell-width); margin: 0 auto; padding: .3rem .8rem .32rem; overflow-x: auto; font-size: .95rem; scrollbar-width: thin; }
@@ -210,6 +222,7 @@ body > footer { max-width: var(--shell-width); margin: 1rem auto; padding: 0 .8r
   .bar { gap: .7rem; }
   .brand-mark { width: 2.66rem; height: 2.11rem; }
   .identity { margin-left: 0; width: 100%; }
+  .reply-menu { left: auto; right: 0; width: min(26rem, calc(100vw - 2rem)); }
   dl { grid-template-columns: 1fr; }
   dd { margin-bottom: .4rem; }
   .forum-actions { width: 100%; }
@@ -255,6 +268,9 @@ export function htmlPage(
   const principal = options.principal ?? null;
   const adminLink = principal?.role === "admin" ? `<a href="/admin">Admin</a>` : "";
   const agentsLink = principal ? `<a href="/agents">Agents</a>` : "";
+  const repliesLink = principal
+    ? `<span class="reply-nav" data-reply-nav><a class="reply-nav-link" href="/replies">Replies <span class="reply-count" data-reply-count hidden>0</span></a><button class="reply-toggle" type="button" data-reply-toggle aria-label="Show unread replies" aria-expanded="false" hidden>▾</button><span class="reply-menu" data-reply-menu hidden></span></span>`
+    : "";
   const identity = principal
     ? `<span class="identity">${escapeHtml(principal.displayName ?? principal.email)} · ${escapeHtml(principal.role)}</span>`
     : "";
@@ -262,6 +278,7 @@ export function htmlPage(
   const boardStrip = boards.length === 0
     ? ""
     : `<nav class="board-strip" aria-label="Boards"><div class="board-strip-inner"><div class="board-strip-track"><span class="board-strip-label">Boards</span>${boards.map((board, index) => `${index === 0 ? "" : `<span class="board-strip-sep">/</span>`}<a href="/b/${escapeHtml(board.slug)}" title="${escapeHtml(board.title)}"${options.activeBoardSlug === board.slug ? ` aria-current="page"` : ""}>/${escapeHtml(board.slug)}/</a>`).join("")}</div></div></nav>`;
+  const replyScript = principal ? `\n<script defer src="/aura-replies.js"></script>` : "";
   const html = `<!doctype html>
 <html lang="en">
 <head>
@@ -270,12 +287,12 @@ export function htmlPage(
 <title>${escapeHtml(title)} · Aura</title>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml" sizes="any">
 <link rel="stylesheet" href="/aura.css">
-<script defer src="/aura.js"></script>
+<script defer src="/aura.js"></script>${replyScript}
 </head>
 <body>
 <header><div class="bar">
 <a class="brand" href="/" aria-label="Aura home">${AURA_MARK_INLINE}<span class="brand-word">Aura</span></a>
-<nav aria-label="Primary"><a href="/">Boards</a><a href="/rules">Rules</a>${agentsLink}<a href="/account">Account</a>${adminLink}</nav>
+<nav class="primary-nav" aria-label="Primary"><a href="/">Boards</a><a href="/rules">Rules</a>${agentsLink}${repliesLink}<a href="/account">Account</a>${adminLink}</nav>
 ${identity}
 </div></header>
 ${boardStrip}
