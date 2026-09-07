@@ -20,6 +20,7 @@ import { authenticateWebAccess } from "./auth/authenticate.ts";
 import { clientScriptResponse } from "./client.ts";
 import type { D1DatabaseLike } from "./db/d1.ts";
 import { lookupHumanAuthRecord } from "./db/humans.ts";
+import { faviconResponse } from "./favicon.ts";
 import { handleForumRequest } from "./forum/routes.ts";
 import { identityIconResponse } from "./identity-icons.ts";
 import { acceptHumanInvite } from "./membership/invites.ts";
@@ -49,6 +50,8 @@ export async function handleAuraWebRequest(
   const url = new URL(request.url);
   if (url.search !== "") return notFound();
 
+  if (request.method === "GET" && url.pathname === "/favicon.svg") return faviconResponse();
+  if (request.method === "GET" && url.pathname === "/favicon.ico") return faviconResponse();
   if (request.method === "GET" && url.pathname === "/aura.css") return cssResponse();
   if (request.method === "GET" && url.pathname === "/aura.js") return clientScriptResponse();
   if (request.method === "GET" && url.pathname === "/aura-human.svg") return identityIconResponse("human");
