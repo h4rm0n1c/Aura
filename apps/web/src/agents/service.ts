@@ -22,6 +22,8 @@ export interface OwnedAgentSummary {
   readonly model: string | null;
   readonly client: string | null;
   readonly status: "active" | "disabled";
+  readonly notifyRepliesToAgent: boolean;
+  readonly notifyRepliesToOwner: boolean;
   readonly createdAt: number;
   readonly updatedAt: number;
   readonly credentials: readonly OwnedAgentCredentialSummary[];
@@ -44,6 +46,8 @@ interface AgentRow {
   readonly model: unknown;
   readonly client: unknown;
   readonly status: unknown;
+  readonly notify_replies_to_agent: unknown;
+  readonly notify_replies_to_owner: unknown;
   readonly created_at: unknown;
   readonly updated_at: unknown;
 }
@@ -61,6 +65,16 @@ interface AgentOwnerRow {
   readonly owner_human_id: unknown;
   readonly name: unknown;
   readonly status: unknown;
+  readonly notify_replies_to_agent: unknown;
+  readonly notify_replies_to_owner: unknown;
+}
+
+interface LoadedAgentOwner {
+  readonly ownerHumanId: string;
+  readonly name: string;
+  readonly status: "active" | "disabled";
+  readonly notifyRepliesToAgent: boolean;
+  readonly notifyRepliesToOwner: boolean;
 }
 
 export async function listOwnedAgents(
@@ -71,7 +85,9 @@ export async function listOwnedAgents(
   let credentialRows: readonly CredentialRow[];
   try {
     const agents = await db.prepare(`
-      SELECT id, name, model, client, status, created_at, updated_at
+      SELECT id, name, model, client, status,
+             notify_replies_to_agent, notify_replies_to_owner,
+             created_at, updated_at
       FROM agents
       WHERE owner_human_id = ?1
       ORDER BY created_at DESC, id DESC
@@ -294,11 +310,79 @@ export async function setOwnedAgentStatus(
   return { ok: true, value: Object.freeze({ agentId, status }) };
 }
 
-async function loadAgentOwner(db: D1DatabaseLike, agentId: string): Promise<{ ownerHumanId: string; name: string; status: "active" | "disabled" } | null> {
+export async function setOwnedAgentReplyNotificationSettings(
+  db: D1DatabaseLike,
+  principal: HumanPrincipal,
+  agentId: string,
+  input: { readonly repliesToAgent: unknown; readonly repliesToOwner: unknown },
+  nowSeconds: number,
+): Promise<AgentServiceResult<{
+  readonly agentId: string;
+  readonly notifyRepliesToAgent: boolean;
+  readonly notifyRepliesToOwner: boolean;
+}>> {
+  if (
+    !isAuraId("agent", agentId) ||
+    typeof input.repliesToAgent !== "boolean" ||
+    typeof input.repliesToOwner !== "boolean" ||
+    !validTimestamp(nowSeconds)
+  ) {
+    return fail("validation_error");
+  }
+  const agent = await loadAgentOwner(db, agentId);
+  if (agent === null) return fail("not_found");
+  const authorized = authorizeAgentProvisioning(principal, agent.ownerHumanId);
+  if (!authorized.ok) return authorized;
+  if (
+    agent.notifyRepliesToAgent === input.repliesToAgent &&
+    agent.notifyRepliesToOwner === input.repliesToOwner
+  ) {
+    return {
+      ok: true,
+      value: Object.freeze({
+        agentId,
+        notifyRepliesToAgent: input.repliesToAgent,
+        notifyRepliesToOwner: input.repliesToOwner,
+      }),
+    };
+  }
+
+  try {
+    const results = await db.batch([
+      db.prepare(`
+        UPDATE agents
+        SET notify_replies_to_agent = ?1,
+            notify_replies_to_owner = ?2,
+            updated_at = ?3
+        WHERE id = ?4 AND owner_human_id = ?5
+      `).bind(input.repliesToAgent ? 1 : 0, input.repliesToOwner ? 1 : 0, nowSeconds, agentId, principal.humanId),
+      db.prepare(`
+        INSERT INTO audit_events
+          (occurred_at, actor_kind, actor_human_id, action, target_kind, target_id, metadata_json)
+        VALUES (?1, 'human', ?2, 'agent_reply_notifications_changed', 'agent', ?3,
+                json_object('replies_to_agent', ?4, 'replies_to_owner', ?5))
+      `).bind(nowSeconds, principal.humanId, agentId, input.repliesToAgent ? 1 : 0, input.repliesToOwner ? 1 : 0),
+    ]);
+    if (resultChanges(results[0]) !== 1 || resultChanges(results[1]) !== 1) return fail("conflict");
+  } catch {
+    return fail("internal_error");
+  }
+
+  return {
+    ok: true,
+    value: Object.freeze({
+      agentId,
+      notifyRepliesToAgent: input.repliesToAgent,
+      notifyRepliesToOwner: input.repliesToOwner,
+    }),
+  };
+}
+
+async function loadAgentOwner(db: D1DatabaseLike, agentId: string): Promise<LoadedAgentOwner | null> {
   let row: AgentOwnerRow | null;
   try {
     row = await db.prepare(`
-      SELECT owner_human_id, name, status
+      SELECT owner_human_id, name, status, notify_replies_to_agent, notify_replies_to_owner
       FROM agents
       WHERE id = ?1
       LIMIT 1
@@ -306,10 +390,23 @@ async function loadAgentOwner(db: D1DatabaseLike, agentId: string): Promise<{ ow
   } catch {
     return null;
   }
-  if (row === null || typeof row.owner_human_id !== "string" || typeof row.name !== "string" || (row.status !== "active" && row.status !== "disabled")) {
+  if (
+    row === null ||
+    typeof row.owner_human_id !== "string" ||
+    typeof row.name !== "string" ||
+    (row.status !== "active" && row.status !== "disabled") ||
+    (row.notify_replies_to_agent !== 0 && row.notify_replies_to_agent !== 1) ||
+    (row.notify_replies_to_owner !== 0 && row.notify_replies_to_owner !== 1)
+  ) {
     return null;
   }
-  return { ownerHumanId: row.owner_human_id, name: row.name, status: row.status };
+  return {
+    ownerHumanId: row.owner_human_id,
+    name: row.name,
+    status: row.status,
+    notifyRepliesToAgent: row.notify_replies_to_agent === 1,
+    notifyRepliesToOwner: row.notify_replies_to_owner === 1,
+  };
 }
 
 function parseAgentRow(row: AgentRow): Omit<OwnedAgentSummary, "credentials"> | null {
@@ -319,6 +416,8 @@ function parseAgentRow(row: AgentRow): Omit<OwnedAgentSummary, "credentials"> | 
     !(row.model === null || (typeof row.model === "string" && row.model.length <= 256)) ||
     !(row.client === null || (typeof row.client === "string" && row.client.length <= 256)) ||
     (row.status !== "active" && row.status !== "disabled") ||
+    (row.notify_replies_to_agent !== 0 && row.notify_replies_to_agent !== 1) ||
+    (row.notify_replies_to_owner !== 0 && row.notify_replies_to_owner !== 1) ||
     !validTimestamp(row.created_at) || !validTimestamp(row.updated_at)
   ) return null;
   return {
@@ -327,6 +426,8 @@ function parseAgentRow(row: AgentRow): Omit<OwnedAgentSummary, "credentials"> | 
     model: row.model,
     client: row.client,
     status: row.status,
+    notifyRepliesToAgent: row.notify_replies_to_agent === 1,
+    notifyRepliesToOwner: row.notify_replies_to_owner === 1,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
