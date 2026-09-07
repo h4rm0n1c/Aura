@@ -7,16 +7,18 @@ import type { HumanPrincipal } from "../../../packages/core/src/auth/principals.
 import type { D1DatabaseLike, D1PreparedStatementLike, D1ResultLike } from "../src/db/d1.ts";
 import { editHumanPost } from "../src/forum/edit-service.ts";
 import { handleForumRequest } from "../src/forum/routes.ts";
-import { createHumanThread } from "../src/forum/service.ts";
+import { createHumanReply, createHumanThread } from "../src/forum/service.ts";
 
-const migrations = [1, 2, 3, 4, 5].map((number) =>
-  readFileSync(new URL(`../../../db/migrations/000${number}_${[
-    "initial",
-    "human_membership_and_board_staff",
-    "unbound_member_invites",
-    "board_thread_lifecycle",
-    "post_edit_history",
-  ][number - 1]}.sql`, import.meta.url), "utf8"));
+const migrationNames = [
+  "0001_initial.sql",
+  "0002_human_membership_and_board_staff.sql",
+  "0003_unbound_member_invites.sql",
+  "0004_board_thread_lifecycle.sql",
+  "0005_post_edit_history.sql",
+  "0006_post_references.sql",
+] as const;
+const migrations = migrationNames.map((name) =>
+  readFileSync(new URL(`../../../db/migrations/${name}`, import.meta.url), "utf8"));
 
 const MEMBER = "hum_AAAAAAAAAAAAAAAAAAAAAA";
 const OTHER = "hum_BBBBBBBBBBBBBBBBBBBBBB";
@@ -132,6 +134,48 @@ test("human edit archives prior raw source without bumping thread activity", asy
     revision: number; body: string; replaced_at: number; replaced_by_human_id: string;
   };
   assert.deepEqual({ ...revision }, { revision: 1, body: "original", replaced_at: 200, replaced_by_human_id: MEMBER });
+  db.close();
+});
+
+test("editing synchronizes backlinks while preserving unchanged reference timestamps", async () => {
+  const db = new DatabaseAdapter();
+  const { member } = seed(db);
+  const created = await thread(db, member);
+  const second = await createHumanReply(db, member, { threadId: created.threadId, body: "second" }, 110);
+  assert(second.ok);
+  if (!second.ok) return db.close();
+  const third = await createHumanReply(db, member, { threadId: created.threadId, body: ">>1 third" }, 120);
+  assert(third.ok);
+  if (!third.ok) return db.close();
+
+  const initial = db.sqlite.prepare(`SELECT target_post_id, created_at
+    FROM post_references WHERE source_post_id=?`).all(third.value.postId) as { target_post_id: string; created_at: number }[];
+  assert.equal(initial.length, 1);
+  assert.equal(initial[0].target_post_id, created.postId);
+  assert.equal(initial[0].created_at, 120);
+
+  const keepAndAdd = await editHumanPost(db, member, {
+    threadId: created.threadId,
+    postId: third.value.postId,
+    body: ">>1 still relevant\n>>2 also relevant",
+  }, 130);
+  assert(keepAndAdd.ok);
+  const afterAdd = db.sqlite.prepare(`SELECT target_post_id, created_at
+    FROM post_references WHERE source_post_id=? ORDER BY target_post_id`).all(third.value.postId) as { target_post_id: string; created_at: number }[];
+  assert.deepEqual(afterAdd.map((row) => [row.target_post_id, row.created_at]).sort(), [
+    [created.postId, 120],
+    [second.value.postId, 130],
+  ].sort());
+
+  const removeOld = await editHumanPost(db, member, {
+    threadId: created.threadId,
+    postId: third.value.postId,
+    body: ">>2 only now",
+  }, 140);
+  assert(removeOld.ok);
+  const afterRemove = db.sqlite.prepare(`SELECT target_post_id, created_at
+    FROM post_references WHERE source_post_id=?`).all(third.value.postId) as { target_post_id: string; created_at: number }[];
+  assert.deepEqual(afterRemove.map((row) => [row.target_post_id, row.created_at]), [[second.value.postId, 130]]);
   db.close();
 });
 
