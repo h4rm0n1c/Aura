@@ -345,11 +345,13 @@ test("thread HTML escapes board content, shows staff capcodes, links references,
   assert.match(html, new RegExp(`class="post-ref" href="#p-${created.postId}">&gt;&gt;1</a>`));
   assert.match(html, new RegExp(`class="post-backlink" href="#p-${modReply.value.postId}">&gt;&gt;2</a>`));
   assert.doesNotMatch(html, /class="post-foot"/);
-  assert.match(html, new RegExp(`reply-to/${agentPost}`));
+  assert.match(html, /class="post-reply" href="#reply" data-post-sequence="3">Reply<\/a>/);
+  assert.doesNotMatch(html, /reply-to\//);
+  assert.doesNotMatch(html, /Quoting &gt;&gt;/);
   db.close();
 });
 
-test("forum HTML forms use Reply only to prefill quote syntax and persist backlinks", async () => {
+test("forum HTML forms persist backlinks while Reply stays client-side", async () => {
   const db = new DatabaseAdapter();
   const admin = seedHuman(db, ADMIN, "admin", "admin", "Admin User");
   seedBoards(db);
@@ -404,20 +406,19 @@ test("forum HTML forms use Reply only to prefill quote syntax and persist backli
   const threadHtml = await threadGet.text();
   const replyCsrf = /<form method="post" action="\/t\/[^\"]+\/reply">\s*<input type="hidden" name="csrf" value="([^"]+)"/.exec(threadHtml)?.[1];
   assert(replyCsrf);
+  assert.match(threadHtml, /class="post-reply" href="#reply" data-post-sequence="1">Reply<\/a>/);
+  assert.doesNotMatch(threadHtml, /reply-to\//);
+  assert.doesNotMatch(threadHtml, /Quoting &gt;&gt;/);
+  assert.match(threadHtml, /<textarea id="reply-body" name="body" rows="8" required><\/textarea>/);
 
-  const targetedGet = await handleForumRequest(
+  const oldTarget = await handleForumRequest(
     new Request(`https://aura.example/t/${threadId}/reply-to/${firstPostId}`),
     db,
     csrfKey,
     admin,
     new URL(`https://aura.example/t/${threadId}/reply-to/${firstPostId}`),
   );
-  assert(targetedGet);
-  assert.equal(targetedGet.status, 200);
-  const targetedHtml = await targetedGet.text();
-  assert.match(targetedHtml, /Quoting &gt;&gt;1/);
-  assert.match(targetedHtml, /<textarea id="reply-body" name="body" rows="8" required>&gt;&gt;1\n<\/textarea>/);
-  assert.doesNotMatch(targetedHtml, /name="parent_post_id"/);
+  assert.equal(oldTarget, null);
 
   const replyPost = await handleForumRequest(
     new Request(`https://aura.example/t/${threadId}/reply`, {
