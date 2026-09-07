@@ -26,6 +26,7 @@ const tests = [
   "db/test/admin-invariants.test.ts",
   "db/test/identity-lifecycle.test.ts",
   "db/test/board-thread-lifecycle.test.ts",
+  "db/test/post-references.test.ts",
 ];
 
 const [major, minor] = process.versions.node.split(".").map(Number);
