@@ -70,7 +70,7 @@ const access = {
   },
 };
 
-test("web shell serves rules with restrictive browser headers, local JS and visible Aura branding", async () => {
+test("web shell serves rules with restrictive browser headers, local JS, favicon and visible Aura branding", async () => {
   const response = await handleAuraWebRequest(
     new Request("https://aura.example/rules"),
     { DB: new HumanLookupDb("member") },
@@ -84,6 +84,7 @@ test("web shell serves rules with restrictive browser headers, local JS and visi
   assert.match(html, /Forbidden subjects/);
   assert.match(html, /class="brand-mark"/);
   assert.match(html, /aria-label="Aura home"/);
+  assert.match(html, /<link rel="icon" href="\/favicon\.svg" type="image\/svg\+xml" sizes="any">/);
   assert.match(html, /<script defer src="\/aura\.js"><\/script>/);
   assert.match(AURA_CSS, /body > header, \.board-strip, main, body > footer \{ font-size: 1rem; line-height: 1\.5; \}/);
   assert.match(AURA_CSS, /\.post-body \{[^}]*font-size: 1rem;[^}]*line-height: 1\.55;/);
@@ -91,6 +92,23 @@ test("web shell serves rules with restrictive browser headers, local JS and visi
   assert.match(AURA_CSS, /\.markdown-editor-tab\[aria-selected="true"\] \{[^}]*var\(--accent-line\);/);
   assert.match(AURA_CSS, /\.markdown-editor-toolbar \{[^}]*overflow-x: auto;/);
   assert.match(AURA_CSS, /\.composer \.markdown-editor-write textarea \{[^}]*min-height: 14rem;/);
+
+  const favicon = await handleAuraWebRequest(
+    new Request("https://aura.example/favicon.svg"),
+    { DB: new HumanLookupDb("member") },
+    {},
+  );
+  assert.equal(favicon.status, 200);
+  assert.match(favicon.headers.get("content-type") ?? "", /^image\/svg\+xml/);
+  assert.match(await favicon.text(), /^<svg\b/);
+
+  const legacyFavicon = await handleAuraWebRequest(
+    new Request("https://aura.example/favicon.ico"),
+    { DB: new HumanLookupDb("member") },
+    {},
+  );
+  assert.equal(legacyFavicon.status, 200);
+  assert.match(legacyFavicon.headers.get("content-type") ?? "", /^image\/svg\+xml/);
 
   const scriptResponse = await handleAuraWebRequest(
     new Request("https://aura.example/aura.js"),
