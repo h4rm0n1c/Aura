@@ -3,7 +3,7 @@ import { AURA_MARK_INLINE } from "./brand.ts";
 
 const CSP = [
   "default-src 'self'",
-  "script-src 'none'",
+  "script-src 'self'",
   "style-src 'self'",
   "img-src 'self'",
   "font-src 'self'",
@@ -170,7 +170,7 @@ td form.inline { display: inline-flex; gap: .4rem; align-items: center; margin: 
 .markdown-preview .markdown-body { padding: .72rem .78rem .8rem; }
 .composer { position: relative; width: 100%; min-height: 12rem; border: 1px solid var(--line-strong); border-top: 2px solid var(--accent-line); padding: .75rem .8rem .85rem 12.3rem; overflow: hidden; }
 .composer::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 11.5rem; background: #111; border-right: 1px solid var(--line); }
-.composer > .reply-target, .composer > form { position: relative; z-index: 1; }
+.composer > form { position: relative; z-index: 1; }
 .composer form { margin: 0; display: grid; gap: .58rem; }
 .composer form > p { margin: 0; }
 .composer input[type="text"], .composer textarea { width: 100%; max-width: none; }
@@ -182,7 +182,6 @@ td form.inline { display: inline-flex; gap: .4rem; align-items: center; margin: 
 .markdown-help { color: var(--muted); font-size: .9rem; }
 .markdown-help summary { width: max-content; cursor: pointer; color: var(--link); }
 .markdown-help div { margin-top: .35rem; line-height: 1.55; }
-.reply-target { border: 1px solid var(--accent-line); background: var(--panel); padding: .48rem .58rem; margin: 0 0 .65rem; font-size: .98rem; }
 body > footer { max-width: var(--shell-width); margin: 1rem auto; padding: 0 .8rem 1rem; color: var(--muted); font-size: .95rem; }
 @media (max-width: 760px) {
   html { font-size: 125%; }
@@ -244,6 +243,7 @@ export function htmlPage(
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${escapeHtml(title)} · Aura</title>
 <link rel="stylesheet" href="/aura.css">
+<script defer src="/aura.js"></script>
 </head>
 <body>
 <header><div class="bar">
