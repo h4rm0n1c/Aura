@@ -6,6 +6,7 @@ import { loadAgentCredentialRecord } from "./db/credentials.ts";
 import type { D1DatabaseLike } from "./db/d1.ts";
 import { validateMcpRequestPolicy } from "./http-security.ts";
 import { authRateKey, checkRateLimit, type RateLimiterLike } from "./rate-limit.ts";
+import { loadPassiveReplyStatus } from "./replies/service.ts";
 import { createAuraMcpServer } from "./server.ts";
 
 export interface Env {
@@ -71,9 +72,15 @@ async function handleRequest(request: Request, env: Env): Promise<Response> {
     return new Response("Request too large", { status: 413, headers: SECURITY_HEADERS });
   }
 
+  // This query happens outside the model's control on every authenticated MCP
+  // HTTP request. Clients that refresh MCP metadata/tool lists as part of their
+  // normal loop therefore receive current reply status without relying on the
+  // agent to remember to poll an Aura tool first.
+  const passiveReplyStatus = await loadPassiveReplyStatus(env.DB, authenticated.principal);
   const handler = createMcpHandler(() => createAuraMcpServer({
     db: env.DB,
     principal: authenticated.principal,
+    passiveReplyStatus,
   }));
   const response = await handler.fetch(request);
   return withSecurityHeaders(response);
