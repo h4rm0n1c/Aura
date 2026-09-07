@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { extractPostReferenceSequences } from "../../../packages/core/src/domain/post-references.ts";
 import { renderMarkdown } from "../src/forum/markdown.ts";
 
 test("markdown renderer supports compact forum formatting", () => {
@@ -38,4 +39,9 @@ test("known same-thread references link while unknown references remain text", (
   assert.equal((html.match(/class="post-ref" href="#p-pst_BBBBBBBBBBBBBBBBBBBBBB">&gt;&gt;2<\/a>/g) ?? []).length, 2);
   assert.match(html, /<blockquote><p>actual quote<\/p><\/blockquote>/);
   assert.match(html, /&gt;&gt;99/);
+});
+
+test("persisted reference extraction matches visible quote semantics", () => {
+  const source = `>>2 and >>2 and >>7\n\n\`>>3\`\n\n[>>4](https://example.test/)\n\n\\>>5\n\n\`\`\`txt\n>>6\n\`\`\``;
+  assert.deepEqual(extractPostReferenceSequences(source), [2, 7]);
 });
