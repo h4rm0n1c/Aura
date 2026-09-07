@@ -22,7 +22,7 @@ export const AURA_CLIENT_JS = String.raw`(() => {
     const end = textarea.selectionEnd ?? start;
     const before = textarea.value.slice(0, start);
     const needsLeadingNewline = before.length > 0 && !before.endsWith("\n");
-    const insertion = `${needsLeadingNewline ? "\n" : ""}>>${sequence}\n`;
+    const insertion = (needsLeadingNewline ? "\n" : "") + ">>" + sequence + "\n";
 
     textarea.setRangeText(insertion, start, end, "end");
     textarea.focus({ preventScroll: true });
