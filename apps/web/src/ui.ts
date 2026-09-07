@@ -268,6 +268,7 @@ export function htmlPage(
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${escapeHtml(title)} · Aura</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml" sizes="any">
 <link rel="stylesheet" href="/aura.css">
 <script defer src="/aura.js"></script>
 </head>
