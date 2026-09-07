@@ -96,10 +96,18 @@ test("web shell serves rules with restrictive browser headers, local JS and visi
   assert.equal(scriptResponse.status, 200);
   assert.match(scriptResponse.headers.get("content-type") ?? "", /^application\/javascript/);
   const script = await scriptResponse.text();
+  assert.doesNotThrow(() => new Function(script));
   assert.match(script, /a\.post-reply/);
   assert.match(script, /preventDefault\(\)/);
   assert.match(script, /setRangeText/);
   assert.match(script, /scrollIntoView/);
+  assert.match(script, /renderMarkdownInto/);
+  assert.match(script, /document\.createTextNode/);
+  assert.match(script, /TextEncoder/);
+  assert.match(script, /setCustomValidity/);
+  assert.match(script, /editor-preview-toggle/);
+  assert.match(script, /Ctrl\+B/);
+  assert.doesNotMatch(script, /innerHTML/);
   assert.doesNotMatch(script, /fetch\(/);
   assert.doesNotMatch(script, /location\s*=/);
 });
