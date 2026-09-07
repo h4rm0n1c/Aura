@@ -17,9 +17,7 @@ function fail(message) {
 
 function parseMode() {
   const args = process.argv.slice(2);
-  if (args.length !== 1 || !["--plan", "--deploy"].includes(args[0])) {
-    fail("Usage: node web-deploy.mjs --plan|--deploy");
-  }
+  if (args.length !== 1 || !["--plan", "--deploy"].includes(args[0])) fail("Usage: node web-deploy.mjs --plan|--deploy");
   return args[0] === "--plan" ? "plan" : "deploy";
 }
 
@@ -35,6 +33,7 @@ function loadConfig(mode) {
   const apiToken = mode === "deploy" ? requireEnv("CLOUDFLARE_API_TOKEN") : "";
   const d1Name = process.env.AURA_D1_NAME?.trim() || "aura";
   const workerName = process.env.AURA_WEB_WORKER_NAME?.trim().toLowerCase() || "aura-web";
+  const mcpWorkerName = process.env.AURA_MCP_WORKER_NAME?.trim().toLowerCase() || "aura-mcp";
   const audience = process.env.AURA_ACCESS_AUD?.trim() || "";
   const csrfKeyHex = process.env.AURA_CSRF_KEY_HEX?.trim() || "";
 
@@ -44,6 +43,7 @@ function loadConfig(mode) {
   }
   if (!/^[A-Za-z0-9_-]{1,64}$/.test(d1Name)) fail("AURA_D1_NAME is invalid.");
   if (!/^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/.test(workerName)) fail("AURA_WEB_WORKER_NAME is invalid.");
+  if (!/^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/.test(mcpWorkerName)) fail("AURA_MCP_WORKER_NAME is invalid.");
 
   const hasAudience = audience.length > 0;
   const hasCsrf = csrfKeyHex.length > 0;
@@ -51,12 +51,27 @@ function loadConfig(mode) {
   if (hasCsrf && !/^[0-9a-f]{64}$/.test(csrfKeyHex)) fail("AURA_CSRF_KEY_HEX must be 64 lowercase hexadecimal characters.");
   if (hasAudience && audience.length > 512) fail("AURA_ACCESS_AUD is too long.");
 
+  const defaultMcpUrl = `https://${mcpWorkerName}.${workersDevSubdomain}/mcp`;
+  const mcpUrl = process.env.AURA_MCP_URL?.trim() || defaultMcpUrl;
+  let parsedMcp;
+  try {
+    parsedMcp = new URL(mcpUrl);
+  } catch {
+    fail("AURA_MCP_URL is not a valid URL.");
+  }
+  if (
+    parsedMcp.protocol !== "https:" || parsedMcp.username || parsedMcp.password ||
+    parsedMcp.search || parsedMcp.hash || parsedMcp.pathname !== "/mcp"
+  ) fail("AURA_MCP_URL must be an HTTPS /mcp endpoint without credentials, query, or fragment.");
+
   return Object.freeze({
     accountId,
     workersDevSubdomain,
     apiToken,
     d1Name,
     workerName,
+    mcpWorkerName,
+    mcpUrl: parsedMcp.href,
     audience,
     csrfKeyHex,
     configured: hasAudience,
@@ -93,52 +108,40 @@ async function cfRequest(cfg, path, options = {}) {
   const text = await response.text();
   let payload = null;
   if (text) {
-    try {
-      payload = JSON.parse(text);
-    } catch {
-      fail(`Cloudflare returned non-JSON data for ${options.method || "GET"} ${path} (HTTP ${response.status}).`);
-    }
+    try { payload = JSON.parse(text); }
+    catch { fail(`Cloudflare returned non-JSON data for ${options.method || "GET"} ${path} (HTTP ${response.status}).`); }
   }
   if (!response.ok || payload?.success === false) {
     const detail = (Array.isArray(payload?.errors) ? payload.errors : [])
       .map((entry) => typeof entry?.message === "string" ? entry.message : null)
-      .filter(Boolean)
-      .slice(0, 5)
-      .join("; ");
+      .filter(Boolean).slice(0, 5).join("; ");
     fail(`Cloudflare API rejected ${options.method || "GET"} ${path} (HTTP ${response.status})${detail ? `: ${detail}` : "."}`);
   }
   return payload;
 }
 
 async function cfJson(cfg, path, method, body) {
-  return cfRequest(cfg, path, {
-    method,
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
+  return cfRequest(cfg, path, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 }
 
 async function findD1(cfg) {
   const params = new URLSearchParams({ name: cfg.d1Name, per_page: "10" });
   const payload = await cfRequest(cfg, `/accounts/${cfg.accountId}/d1/database?${params}`);
   const exact = (Array.isArray(payload?.result) ? payload.result : []).filter((db) => db?.name === cfg.d1Name);
-  if (exact.length !== 1 || typeof exact[0]?.uuid !== "string") {
-    fail(`Expected exactly one D1 database named ${cfg.d1Name}.`);
-  }
+  if (exact.length !== 1 || typeof exact[0]?.uuid !== "string") fail(`Expected exactly one D1 database named ${cfg.d1Name}.`);
   return exact[0].uuid;
 }
 
 function metadata(cfg, databaseId) {
-  const bindings = [{ type: "d1", name: "DB", id: databaseId }];
+  const bindings = [
+    { type: "d1", name: "DB", id: databaseId },
+    { type: "plain_text", name: "AURA_MCP_URL", text: cfg.mcpUrl },
+  ];
   if (cfg.configured) {
     bindings.push({ type: "plain_text", name: "AURA_ACCESS_AUD", text: cfg.audience });
     bindings.push({ type: "secret_text", name: "AURA_CSRF_KEY_HEX", text: cfg.csrfKeyHex });
   }
-  return {
-    main_module: "main.js",
-    compatibility_date: COMPATIBILITY_DATE,
-    bindings,
-  };
+  return { main_module: "main.js", compatibility_date: COMPATIBILITY_DATE, bindings };
 }
 
 async function upload(cfg, databaseId) {
@@ -146,20 +149,11 @@ async function upload(cfg, databaseId) {
   const form = new FormData();
   form.append("metadata", JSON.stringify(metadata(cfg, databaseId)));
   form.append("main.js", new Blob([source], { type: "application/javascript+module" }), "main.js");
-  await cfRequest(
-    cfg,
-    `/accounts/${cfg.accountId}/workers/scripts/${encodeURIComponent(cfg.workerName)}`,
-    { method: "PUT", body: form },
-  );
+  await cfRequest(cfg, `/accounts/${cfg.accountId}/workers/scripts/${encodeURIComponent(cfg.workerName)}`, { method: "PUT", body: form });
 }
 
 async function enableWorkersDev(cfg) {
-  await cfJson(
-    cfg,
-    `/accounts/${cfg.accountId}/workers/scripts/${encodeURIComponent(cfg.workerName)}/subdomain`,
-    "POST",
-    { enabled: true, previews_enabled: false },
-  );
+  await cfJson(cfg, `/accounts/${cfg.accountId}/workers/scripts/${encodeURIComponent(cfg.workerName)}/subdomain`, "POST", { enabled: true, previews_enabled: false });
 }
 
 async function smokeStaged(cfg) {
@@ -170,9 +164,7 @@ async function smokeStaged(cfg) {
       const response = await fetch(url, { redirect: "manual" });
       last = `HTTP ${response.status}`;
       if (response.status === 503) return;
-    } catch (error) {
-      last = error instanceof Error ? error.message : String(error);
-    }
+    } catch (error) { last = error instanceof Error ? error.message : String(error); }
     await new Promise((resolveDelay) => setTimeout(resolveDelay, attempt * 750));
   }
   fail(`Staged aura-web did not reach expected HTTP 503 after propagation (${last}).`);
@@ -186,6 +178,7 @@ async function main() {
   console.log("Aura web deployment plan");
   console.log(`  Worker:       ${cfg.workerName}`);
   console.log(`  URL:          https://${cfg.hostname}/`);
+  console.log(`  MCP endpoint: ${cfg.mcpUrl}`);
   console.log(`  D1 database:  ${cfg.d1Name}`);
   console.log(`  Bundle bytes: ${bundleBytes}`);
   console.log(`  Runtime auth: ${cfg.configured ? "Access AUD + CSRF secret supplied" : "staged / setup-incomplete"}`);
