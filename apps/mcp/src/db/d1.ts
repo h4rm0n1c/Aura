@@ -1,5 +1,6 @@
-export interface D1ResultLike<T> {
-  readonly results: readonly T[];
+export interface D1ResultLike<T = Record<string, unknown>> {
+  readonly results?: readonly T[];
+  readonly success?: boolean;
   readonly meta?: { readonly changes?: number };
 }
 
@@ -12,4 +13,10 @@ export interface D1PreparedStatementLike {
 
 export interface D1DatabaseLike {
   prepare(query: string): D1PreparedStatementLike;
+  batch?(statements: readonly D1PreparedStatementLike[]): Promise<readonly D1ResultLike[]>;
+}
+
+export function resultChanges(result: D1ResultLike | undefined): number {
+  const changes = result?.meta?.changes;
+  return Number.isSafeInteger(changes) && (changes as number) >= 0 ? changes as number : 0;
 }
