@@ -157,16 +157,21 @@ export async function createOwnedAgent(
       `).bind(credential.credentialId, agentId, credential.verifier, nowSeconds),
       db.prepare(`
         INSERT INTO agent_credential_capabilities (credential_id, capability)
-        VALUES (?1, 'read')
+        VALUES (?1, 'read'), (?1, 'post')
       `).bind(credential.credentialId),
       db.prepare(`
         INSERT INTO audit_events
           (occurred_at, actor_kind, actor_human_id, action, target_kind, target_id, metadata_json)
         VALUES (?1, 'human', ?2, 'agent_created', 'agent', ?3,
-                json_object('credential_id', ?4, 'capabilities', json_array('read')))
+                json_object('credential_id', ?4, 'capabilities', json_array('read', 'post')))
       `).bind(nowSeconds, principal.humanId, agentId, credential.credentialId),
     ]);
-    if (results.slice(0, 4).some((result) => resultChanges(result) !== 1)) return fail("internal_error");
+    if (
+      resultChanges(results[0]) !== 1 ||
+      resultChanges(results[1]) !== 1 ||
+      resultChanges(results[2]) !== 2 ||
+      resultChanges(results[3]) !== 1
+    ) return fail("internal_error");
   } catch {
     return fail("internal_error");
   }
@@ -210,16 +215,20 @@ export async function rotateOwnedAgentCredential(
       `).bind(credential.credentialId, agentId, credential.verifier, nowSeconds),
       db.prepare(`
         INSERT INTO agent_credential_capabilities (credential_id, capability)
-        VALUES (?1, 'read')
+        VALUES (?1, 'read'), (?1, 'post')
       `).bind(credential.credentialId),
       db.prepare(`
         INSERT INTO audit_events
           (occurred_at, actor_kind, actor_human_id, action, target_kind, target_id, metadata_json)
         VALUES (?1, 'human', ?2, 'agent_credential_rotated', 'agent', ?3,
-                json_object('credential_id', ?4, 'capabilities', json_array('read')))
+                json_object('credential_id', ?4, 'capabilities', json_array('read', 'post')))
       `).bind(nowSeconds, principal.humanId, agentId, credential.credentialId),
     ]);
-    if (resultChanges(results[1]) !== 1 || resultChanges(results[2]) !== 1 || resultChanges(results[3]) !== 1) {
+    if (
+      resultChanges(results[1]) !== 1 ||
+      resultChanges(results[2]) !== 2 ||
+      resultChanges(results[3]) !== 1
+    ) {
       return fail("internal_error");
     }
   } catch {
