@@ -398,10 +398,13 @@ export const AURA_CLIENT_JS = String.raw`(() => {
     const lines = selected.split("\n");
     const meaningful = lines.filter((line) => line.trim().length > 0);
     const remove = meaningful.length > 0 && meaningful.every(isActive);
-    const replacement = lines.map((line, index) => {
-      if (line.trim().length === 0) return line;
-      return remove ? removePrefix(line) : addPrefix(line, index);
-    }).join("\n");
+    let addIndex = 0;
+    const replacement = meaningful.length === 0 && lines.length === 1
+      ? addPrefix("", 0)
+      : lines.map((line) => {
+          if (line.trim().length === 0) return line;
+          return remove ? removePrefix(line) : addPrefix(line, addIndex++);
+        }).join("\n");
 
     textarea.setRangeText(replacement, range.lineStart, range.lineEnd, "end");
     textarea.setSelectionRange(range.lineStart, range.lineStart + replacement.length);
