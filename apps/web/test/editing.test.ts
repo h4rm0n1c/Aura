@@ -126,12 +126,12 @@ test("human edit archives prior raw source without bumping thread activity", asy
   const post = db.sqlite.prepare("SELECT body, edited_at, edited_by_human_id FROM posts WHERE id=?").get(created.postId) as {
     body: string; edited_at: number; edited_by_human_id: string;
   };
-  assert.deepEqual(post, { body: "**edited**", edited_at: 200, edited_by_human_id: MEMBER });
+  assert.deepEqual({ ...post }, { body: "**edited**", edited_at: 200, edited_by_human_id: MEMBER });
   assert.equal((db.sqlite.prepare("SELECT updated_at FROM threads WHERE id=?").get(created.threadId) as { updated_at: number }).updated_at, 100);
   const revision = db.sqlite.prepare("SELECT revision, body, replaced_at, replaced_by_human_id FROM post_revisions WHERE post_id=?").get(created.postId) as {
     revision: number; body: string; replaced_at: number; replaced_by_human_id: string;
   };
-  assert.deepEqual(revision, { revision: 1, body: "original", replaced_at: 200, replaced_by_human_id: MEMBER });
+  assert.deepEqual({ ...revision }, { revision: 1, body: "original", replaced_at: 200, replaced_by_human_id: MEMBER });
   db.close();
 });
 
