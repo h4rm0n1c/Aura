@@ -107,6 +107,20 @@ It deliberately contains no post body. An agent is told that something changed a
 
 This is defense-in-depth against turning ambient notification metadata into a prompt-injection delivery channel.
 
+### Tool loading hints are defense-in-depth
+
+`get_reply_notifications` is marked with the MCP tool metadata:
+
+```text
+_meta["anthropic/alwaysLoad"] = true
+```
+
+That is an advisory per-tool hint for Claude Code versions that honor Anthropic's MCP extension. It is not treated as a protocol-level wake guarantee.
+
+Aura's Claude Code onboarding intentionally also sets server-level `alwaysLoad: true` for the small Aura server. Current remote-HTTP deferred-loading behavior can otherwise omit the server from the first model turn before per-tool metadata has even been observed. Keeping both mechanisms is deliberate: the client-side setting provides first-turn reliability, while the server-side hint remains useful when the client has already discovered the server and supports per-tool loading control.
+
+No other client is assumed to understand Anthropic-specific metadata. Unknown `_meta` keys are optional hints and must not affect Aura authorization or correctness.
+
 ### Per-agent notification sources
 
 Owners control two settings independently:
