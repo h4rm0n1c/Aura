@@ -179,6 +179,28 @@ td form.inline { display: inline-flex; gap: .4rem; align-items: center; margin: 
 .composer-actions { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
 .composer-actions button[type="submit"] { margin-top: .12rem; }
 .composer-actions button[type="submit"]:last-child { border-color: var(--action-bg); background: var(--action-bg); color: var(--action-text); font-weight: 600; }
+.markdown-editor { border: 1px solid var(--line-strong); background: var(--field); overflow: hidden; }
+.markdown-editor-header { min-height: 2.45rem; display: flex; justify-content: space-between; align-items: stretch; gap: .6rem; border-bottom: 1px solid var(--line); background: var(--panel-soft); }
+.markdown-editor-tabs { display: flex; align-items: stretch; }
+.markdown-editor-tab { min-width: 4.8rem; border: 0; border-right: 1px solid var(--line); background: transparent; color: var(--muted); padding: .48rem .72rem .42rem; font-weight: 700; }
+.markdown-editor-tab:hover { border-color: var(--line); background: #252525; color: var(--text); }
+.markdown-editor-tab[aria-selected="true"] { background: var(--field); color: var(--text); box-shadow: inset 0 -2px 0 var(--accent-line); }
+.markdown-editor-header-hint { align-self: center; padding-right: .65rem; color: var(--muted); font-size: .84rem; }
+.markdown-editor-toolbar { display: flex; gap: .16rem; align-items: center; min-height: 2.35rem; padding: .3rem .4rem; overflow-x: auto; border-bottom: 1px solid var(--line); background: #111; scrollbar-width: thin; }
+.markdown-editor-tool { flex: none; min-width: 2rem; border: 1px solid transparent; background: transparent; color: var(--text); padding: .28rem .42rem; font-size: .88rem; font-weight: 600; white-space: nowrap; }
+.markdown-editor-tool:hover { border-color: var(--line); background: var(--panel-soft); }
+.markdown-editor-separator { width: 1px; height: 1.35rem; flex: none; margin: 0 .12rem; background: var(--line); }
+.markdown-editor-write { min-width: 0; }
+.markdown-editor-write p { margin: 0; }
+.markdown-editor-write label { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+.composer .markdown-editor-write textarea { display: block; width: 100%; min-height: 14rem; border: 0; padding: .75rem .8rem; background: var(--field); line-height: 1.52; resize: vertical; }
+.composer .markdown-editor-write textarea:focus-visible { outline: 2px solid var(--link); outline-offset: -2px; }
+.markdown-editor-preview { min-height: 14rem; margin: 0; border: 0; background: var(--field); }
+.markdown-editor-preview .markdown-body { min-height: 14rem; padding: .82rem .86rem .9rem; }
+.markdown-editor-footer { min-height: 2rem; display: flex; justify-content: space-between; gap: .75rem; align-items: center; padding: .3rem .48rem; border-top: 1px solid var(--line); background: #0c0c0c; color: var(--muted); font-size: .78rem; }
+.markdown-editor-footer-help { min-width: 0; overflow-wrap: anywhere; }
+.markdown-editor-status { flex: none; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.markdown-editor-status.invalid { color: var(--danger); font-weight: 700; }
 .markdown-help { color: var(--muted); font-size: .9rem; }
 .markdown-help summary { width: max-content; cursor: pointer; color: var(--link); }
 .markdown-help div { margin-top: .35rem; line-height: 1.55; }
@@ -206,6 +228,10 @@ body > footer { max-width: var(--shell-width); margin: 1rem auto; padding: 0 .8r
   .post-body { min-height: 6rem; padding: .72rem .75rem .88rem; }
   .composer { min-height: 0; padding: .75rem .8rem .85rem; }
   .composer::before { display: none; }
+  .markdown-editor-header-hint { display: none; }
+  .markdown-editor-tab { min-width: 4.25rem; }
+  .markdown-editor-footer { align-items: flex-start; flex-direction: column; gap: .1rem; }
+  .markdown-editor-status { white-space: normal; }
   .thread-list th:nth-child(3), .thread-list td:nth-child(3),
   .thread-list th:nth-child(5), .thread-list td:nth-child(5),
   .board-index th:nth-child(5), .board-index td:nth-child(5),
