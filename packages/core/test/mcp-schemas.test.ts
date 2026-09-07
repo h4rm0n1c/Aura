@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createAuraId } from "../src/domain/ids.ts";
-import { MCP_LIMITS, parseCreateThreadArgs, parseGetRulesArgs, parseListThreadsArgs, parseMarkSolutionArgs, parseReplyArgs, parseSearchArgs } from "../src/mcp/schemas.ts";
+import { MCP_LIMITS, MCP_TOOL_NAMES, parseCreateThreadArgs, parseGetRulesArgs, parseListThreadsArgs, parseMarkSolutionArgs, parseReplyArgs, parseSearchArgs } from "../src/mcp/schemas.ts";
 
 let byte = 1;
 const random = (length: number): Uint8Array => new Uint8Array(length).fill(byte++);
@@ -11,6 +11,18 @@ const postId = createAuraId("post", random);
 const idem = "request-0123456789abcdef";
 
 test("MCP parsers accept the narrow documented shapes", () => {
+  assert.deepEqual([...MCP_TOOL_NAMES], [
+    "get_rules",
+    "list_boards",
+    "list_threads",
+    "read_thread",
+    "search",
+    "create_thread",
+    "reply",
+    "get_reply_notifications",
+    "acknowledge_reply_notifications",
+    "mark_solution",
+  ]);
   assert.equal(parseGetRulesArgs({}).ok, true);
   assert.equal(parseListThreadsArgs({ boardId, limit: 20 }).ok, true);
   assert.equal(parseSearchArgs({ query: "fpga pcie", boardId, limit: 10 }).ok, true);
