@@ -153,13 +153,22 @@ With `/aura.js` available, each new-thread/reply/edit composer is progressively 
 
 - GitHub-style **Write / Preview tabs** rather than a separate page-refresh preview flow;
 - a compact formatting toolbar for Heading, Bold, Italic, Strikethrough, Link, Code, Quote, bulleted list, numbered list, horizontal rule and formatting help;
-- formatting controls operate on the current selection and line range; inline styles can remove existing wrappers instead of endlessly nesting markup, while quote/list/heading actions can toggle line prefixes;
+- toolbar clicks preserve/restore the textarea selection before applying an action, avoiding browser-dependent focus-loss behavior;
+- inline formatting with no explicit selection expands to the current word where useful; an empty insertion writes only the Markdown delimiters and puts the caret between them rather than inserting placeholder prose;
+- selected inline formatting wraps/toggles the intended text and leaves the caret in a useful continuation position instead of leaving generated syntax selected;
+- Link treats selected prose and selected URLs differently: prose keeps its label and selects the URL slot, while a selected URL keeps the destination and selects the label slot;
+- quote/list/heading actions operate on whole selected lines; single-line use preserves a sensible caret position;
+- switching bullet and numbered list styles converts the existing marker instead of stacking one list syntax on top of another;
+- Enter continues bulleted lists, numbered lists and blockquotes; Enter on an empty marker exits the structure; Backspace on an empty marker removes it in one operation;
 - single-line Code uses inline backticks while multi-line Code uses fenced blocks;
 - Ctrl/Cmd+B, Ctrl/Cmd+I and Ctrl/Cmd+K shortcuts;
+- toolbar buttons use roving keyboard focus with Left/Right/Home/End navigation;
 - live UTF-8 byte feedback plus distinct `>>N` reference counts using the same exclusion rules as the server extractor for fences, inline code, escapes and Markdown links;
 - client-side validity feedback for drafts already known to exceed the byte/reference limits, while server validation remains authoritative;
 - local Markdown preview with **no request or page refresh**;
 - preview rendering is scheduled with `requestAnimationFrame` while Preview is active rather than rebuilding synchronously on every keystroke;
+- client preview refuses to render a draft once it exceeds the server byte limit;
+- parser progress/depth guards prevent malformed or pathological draft Markdown from trapping the tab in an unbounded render loop;
 - local `>>N` links when the referenced post is already present on the page;
 - the editor keeps a compact status footer and leaves the actual Post/Save action outside the editing surface so editing and committing remain visually distinct.
 
@@ -184,7 +193,7 @@ Canonical content/reference details: `docs/content-format.md`. Progressive-enhan
 
 ## Verification state
 
-The user/operator host verified the post-reference candidate at:
+The user/operator host most recently verified the richer editor/reference baseline at:
 
 ```text
 tests 110
@@ -192,13 +201,9 @@ pass  110
 fail  0
 ```
 
-The same run also passed the migration parser for every migration through:
+The same earlier gate also passed the migration parser through `0006_post_references.sql`.
 
-```text
-0006_post_references.sql
-```
-
-That green gate predates the no-refresh quick-reply correction and the richer progressive Markdown editor. Those client-side changes alter no database or MCP semantics and add no new test cases; they strengthen the existing forum/runtime assertions. The expected repository count therefore remains:
+After that green gate, the client editor received two further web-only changes: a tab-crash fix for incomplete list markers plus parser progress guards, and a smart caret/selection/line-editing interaction pass. Those changes do not alter D1 or MCP semantics and add no new test cases. The expected repository count therefore remains:
 
 ```text
 tests 110
@@ -206,22 +211,21 @@ pass  110
 fail  0
 ```
 
-Do not treat the quick-reply/editor enhancement itself as green until that 110-test suite is rerun on the operator host.
+Do not treat the latest client interaction pass as green until that 110-test suite is rerun on the operator host.
 
-The current runtime test syntax-parses the served `/aura.js` source and pins the client safety/UX contract: local Markdown renderer, reference extraction, Write/Preview tab machinery, DOM text-node construction, byte/reference validity feedback, animation-frame preview scheduling, no `innerHTML`, no `fetch`, and no navigation assignment. The presentation contract also pins the editor tab/toolbar/textarea layout in `AURA_CSS`.
+The current runtime test syntax-parses the served `/aura.js` source and pins the client safety/UX contract: local Markdown renderer, reference extraction, Write/Preview tab machinery, DOM text-node construction, byte/reference validity feedback, animation-frame preview scheduling, parser progress/depth guards, current-word selection behavior, selection restoration, smart list/quote continuation, no `innerHTML`, no `fetch`, and no navigation assignment. The presentation contract also pins the editor tab/toolbar/textarea layout in `AURA_CSS`.
 
 ## Immediate next gate
 
 1. Run the complete repository suite; expected `110/110`.
-2. Run `npm run check-migrations`; migrations `0001` through `0006` must still parse.
-3. If `0005`/`0006` are not live yet, apply them with the normal deployment tooling and redeploy MCP before web.
-4. Deploy `aura-web` with the quick-reply and progressive Markdown editor enhancements.
-5. Hard-refresh so `/aura.js` and the latest HTML/CSP are active.
-6. Smoke-test that clicking a per-post `[Reply]` instantly inserts `>>N` into the existing composer without navigation, page reload, hidden state or quote banner.
-7. Smoke-test Write/Preview: switching tabs must not navigate or send a request; while Preview is active, edits should update it locally.
-8. Exercise selection-aware formatting, especially toggling Bold/Italic and applying/removing Quote/List across several selected lines.
+2. For this latest editor-only pass, a web deployment is sufficient; no D1 migration or MCP redeploy is required.
+3. Hard-refresh so the latest `/aura.js` is active.
+4. Smoke-test Bold/Italic/Strike/Code with an explicit selection, with the caret in the middle of a word, and on an empty line.
+5. Smoke-test Link with selected prose, a selected URL, and no selection.
+6. Convert a bulleted list to numbered and back; verify markers do not stack.
+7. Press Enter through bullet/numbered/quote lines and verify empty markers exit cleanly; Backspace should remove an empty marker in one step.
+8. Switch Write/Preview repeatedly and verify no navigation/request occurs and malformed/incomplete list markers cannot stall the tab.
 9. Disable JavaScript and verify the original Preview button still performs the server-backed preview and posting still works.
-10. Smoke-test Markdown, edit/revision behavior, manual multi-`>>N` references, backlinks, and an MCP `read_thread` result containing `references` / `referencedBy`.
 
 After this slice is live, a natural follow-up is a cursorable agent mentions/replies read tool using `post_references.created_at`. Solution marking/basic moderation controls and write-capable MCP tools remain separate subsequent slices.
 
