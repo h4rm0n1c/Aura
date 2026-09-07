@@ -25,7 +25,6 @@ const P2 = "pst_BBBBBBBBBBBBBBBBBBBBBB";
 const P3 = "pst_CCCCCCCCCCCCCCCCCCCCCC";
 const P4 = "pst_DDDDDDDDDDDDDDDDDDDDDD";
 const P5 = "pst_EEEEEEEEEEEEEEEEEEEEEE";
-const P6 = "pst_FFFFFFFFFFFFFFFFFFFFFF";
 
 function database(): DatabaseSync {
   const db = new DatabaseSync(":memory:");
@@ -118,28 +117,50 @@ test("replies to an agent post notify that agent by default and never notify it 
   assert.deepEqual(rows.map((row) => ({ ...row })), [
     { source_post_id: P2, target_post_id: P1, recipient_agent_id: A1, reason: "reply_to_agent_post", created_at: 10 },
   ]);
+  const follow = db.prepare(`SELECT source FROM agent_thread_follows WHERE agent_id=? AND thread_id=?`).get(A1, T) as { source: string };
+  assert.equal(follow.source, "participated");
   db.close();
 });
 
-test("owner-post notifications are opt-in per agent and apply only to future references", () => {
+test("owner-post notifications require both opt-in and an agent follow of that thread", () => {
   const db = database();
   seed(db);
+  db.prepare("UPDATE agents SET notify_replies_to_owner=1, updated_at=9 WHERE id=?").run(A1);
   humanPost(db, P1, 1, H1, "owner post");
-  humanPost(db, P2, 2, H2, ">>1 before opt-in");
-  humanPost(db, P3, 3, H2, ">>1 after opt-in");
-  agentPost(db, P4, 4, A1, ">>1 own agent reply");
-
+  humanPost(db, P2, 2, H2, ">>1 before agent participation");
   reference(db, P2, P1, 10);
   assert.equal((db.prepare("SELECT COUNT(*) AS n FROM agent_reply_notifications").get() as { n: number }).n, 0);
 
-  db.prepare("UPDATE agents SET notify_replies_to_owner=1, updated_at=11 WHERE id=?").run(A1);
-  reference(db, P3, P1, 12);
-  reference(db, P4, P1, 13);
+  agentPost(db, P3, 3, A1, "agent joins the conversation");
+  humanPost(db, P4, 4, H2, ">>1 after agent participation");
+  reference(db, P4, P1, 12);
 
   const rows = db.prepare(`SELECT source_post_id, recipient_agent_id, reason
     FROM agent_reply_notifications ORDER BY id`).all() as Array<Record<string, unknown>>;
   assert.deepEqual(rows.map((row) => ({ ...row })), [
-    { source_post_id: P3, recipient_agent_id: A1, reason: "reply_to_owner_post" },
+    { source_post_id: P4, recipient_agent_id: A1, reason: "reply_to_owner_post" },
+  ]);
+  db.close();
+});
+
+test("owner-post notification ignores the owner's own follow-up and the followed agent's own reply", () => {
+  const db = database();
+  seed(db);
+  db.prepare("UPDATE agents SET notify_replies_to_owner=1 WHERE id=?").run(A1);
+  humanPost(db, P1, 1, H1, "owner post");
+  agentPost(db, P2, 2, A1, "agent participates");
+  humanPost(db, P3, 3, H1, ">>1 owner self-follow-up");
+  agentPost(db, P4, 4, A1, ">>1 same agent reply");
+  humanPost(db, P5, 5, H2, ">>1 somebody else");
+
+  reference(db, P3, P1, 10);
+  reference(db, P4, P1, 11);
+  reference(db, P5, P1, 12);
+
+  const rows = db.prepare(`SELECT source_post_id, reason FROM agent_reply_notifications
+    WHERE recipient_agent_id=? ORDER BY id`).all(A1) as Array<Record<string, unknown>>;
+  assert.deepEqual(rows.map((row) => ({ ...row })), [
+    { source_post_id: P5, reason: "reply_to_owner_post" },
   ]);
   db.close();
 });
@@ -149,6 +170,7 @@ test("removing a canonical post reference removes its derived human and agent no
   seed(db);
   db.prepare("UPDATE agents SET notify_replies_to_owner=1 WHERE id=?").run(A1);
   humanPost(db, P1, 1, H1, "owner post");
+  agentPost(db, P3, 3, A1, "agent follows thread");
   humanPost(db, P2, 2, H2, ">>1 reply");
   reference(db, P2, P1, 10);
 
