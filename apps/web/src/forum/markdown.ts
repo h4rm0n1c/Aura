@@ -42,10 +42,10 @@ export function renderMarkdown(source: string, options: MarkdownRenderOptions = 
       continue;
     }
 
-    if (/^\s*>/.test(line)) {
+    if (/^\s*>(?!>)/.test(line)) {
       const quoted: string[] = [];
       while (index < lines.length) {
-        const match = lines[index].match(/^\s*>\s?(.*)$/);
+        const match = lines[index].match(/^\s*>(?!>)\s?(.*)$/);
         if (match === null) break;
         quoted.push(match[1]);
         index += 1;
@@ -99,7 +99,7 @@ function startsBlock(line: string, insideParagraph: boolean): boolean {
   if (!insideParagraph) return false;
   return /^\s*```/.test(line) ||
     /^\s*#{1,6}\s+/.test(line) ||
-    /^\s*>/.test(line) ||
+    /^\s*>(?!>)/.test(line) ||
     /^\s*[-+*]\s+/.test(line) ||
     /^\s*\d+\.\s+/.test(line) ||
     /^\s{0,3}((\*\s*){3,}|(-\s*){3,}|(_\s*){3,})\s*$/.test(line);
