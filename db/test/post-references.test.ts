@@ -49,12 +49,22 @@ function seedPost(db: DatabaseSync, postId: string, threadId: string, sequence: 
     VALUES (?, ?, ?, 'human', ?, ?, 'visible', 3)`).run(postId, threadId, sequence, H, body);
 }
 
-test("migration 0006 removes parent replies and creates indexed post references", () => {
-  const db = databaseThrough(6);
+test("migration 0006 preserves ordinary posts while removing parent replies", () => {
+  const db = databaseThrough(5);
+  seedHumanBoard(db);
+  seedThread(db, T1, "Thread");
+  seedPost(db, P1, T1, 1, "existing post body");
+
+  db.exec(migrations[5]);
+
   const columns = new Set(db.prepare("PRAGMA table_info(posts)").all().map((row) => (row as { name: string }).name));
   assert.equal(columns.has("parent_post_id"), false);
   assert.equal(columns.has("edited_at"), true);
   assert.equal(columns.has("edited_by_human_id"), true);
+  const post = db.prepare("SELECT thread_id, sequence, author_human_id, body FROM posts WHERE id=?").get(P1) as {
+    thread_id: string; sequence: number; author_human_id: string; body: string;
+  };
+  assert.deepEqual({ ...post }, { thread_id: T1, sequence: 1, author_human_id: H, body: "existing post body" });
 
   const tables = new Set(db.prepare("SELECT name FROM sqlite_schema WHERE type='table'").all().map((row) => (row as { name: string }).name));
   assert(tables.has("post_references"));
