@@ -1,19 +1,25 @@
 -- Replace the unused single-parent reply model with persisted thread-local
--- >>N reference relationships. There is intentionally no compatibility path:
--- the migration refuses to proceed if any parent_post_id was ever populated.
+-- >>N reference relationships. There is intentionally no compatibility path.
+-- This migration refuses to translate any legacy parent, solution or revision
+-- relationship because none of those write paths have been deployed live.
 
-CREATE TABLE aura_migration_0006_parent_guard (
+CREATE TABLE aura_migration_0006_guard (
     value INTEGER NOT NULL CHECK(value = 0)
 );
 
-INSERT INTO aura_migration_0006_parent_guard (value)
+INSERT INTO aura_migration_0006_guard (value)
 SELECT 1 FROM posts WHERE parent_post_id IS NOT NULL LIMIT 1;
+INSERT INTO aura_migration_0006_guard (value)
+SELECT 1 FROM threads WHERE solution_post_id IS NOT NULL LIMIT 1;
+INSERT INTO aura_migration_0006_guard (value)
+SELECT 1 FROM post_revisions LIMIT 1;
 
-DROP TABLE aura_migration_0006_parent_guard;
+DROP TABLE aura_migration_0006_guard;
 
--- Rebuild posts because parent_post_id participates in a self-referencing
--- foreign key and therefore cannot be removed with SQLite DROP COLUMN.
-PRAGMA foreign_keys = OFF;
+-- D1 runs migrations in an implicit transaction and does not permit migrations
+-- to disable foreign-key enforcement. Defer validation while rebuilding posts;
+-- the guards above ensure no extant row points into the old posts table.
+PRAGMA defer_foreign_keys = ON;
 
 DROP TRIGGER trg_posts_require_edit_metadata;
 DROP TRIGGER trg_posts_archive_revision;
@@ -80,5 +86,5 @@ CREATE INDEX idx_post_references_target
 CREATE INDEX idx_post_references_thread_source
     ON post_references(thread_id, source_post_id, target_post_id);
 
-PRAGMA foreign_keys = ON;
 PRAGMA foreign_key_check;
+PRAGMA defer_foreign_keys = OFF;
