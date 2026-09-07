@@ -28,13 +28,14 @@ test("inline and fenced code suppress markdown and post-reference parsing", () =
   const refs = new Map([[1, "pst_AAAAAAAAAAAAAAAAAAAAAA"]]);
   const html = renderMarkdown(`\`**not bold** >>1\`\n\n\`\`\`ts\nconst ref = ">>1";\n**still not bold**\n\`\`\``, { postIdBySequence: refs });
   assert.match(html, /<code>\*\*not bold\*\* &gt;&gt;1<\/code>/);
-  assert.match(html, /<pre><code class="language-ts">const ref = "&gt;&gt;1";\n\*\*still not bold\*\*<\/code><\/pre>/);
+  assert.match(html, /<pre><code class="language-ts">const ref = &quot;&gt;&gt;1&quot;;\n\*\*still not bold\*\*<\/code><\/pre>/);
   assert.equal((html.match(/class="post-ref"/g) ?? []).length, 0);
 });
 
 test("known same-thread references link while unknown references remain text", () => {
   const refs = new Map([[2, "pst_BBBBBBBBBBBBBBBBBBBBBB"]]);
-  const html = renderMarkdown(`See >>2 and >>99.`, { postIdBySequence: refs });
-  assert.match(html, /class="post-ref" href="#p-pst_BBBBBBBBBBBBBBBBBBBBBB">&gt;&gt;2<\/a>/);
+  const html = renderMarkdown(`>>2\n\n> actual quote\n\nSee >>2 and >>99.`, { postIdBySequence: refs });
+  assert.equal((html.match(/class="post-ref" href="#p-pst_BBBBBBBBBBBBBBBBBBBBBB">&gt;&gt;2<\/a>/g) ?? []).length, 2);
+  assert.match(html, /<blockquote><p>actual quote<\/p><\/blockquote>/);
   assert.match(html, /&gt;&gt;99/);
 });
