@@ -70,22 +70,38 @@ const access = {
   },
 };
 
-test("web shell serves rules with restrictive browser headers and visible Aura branding", async () => {
+test("web shell serves rules with restrictive browser headers, local JS and visible Aura branding", async () => {
   const response = await handleAuraWebRequest(
     new Request("https://aura.example/rules"),
     { DB: new HumanLookupDb("member") },
     {},
   );
   assert.equal(response.status, 200);
-  assert.match(response.headers.get("content-security-policy") ?? "", /script-src 'none'/);
+  assert.match(response.headers.get("content-security-policy") ?? "", /script-src 'self'/);
   assert.equal(response.headers.get("referrer-policy"), "no-referrer");
   assert.equal(response.headers.get("x-content-type-options"), "nosniff");
   const html = await response.text();
   assert.match(html, /Forbidden subjects/);
   assert.match(html, /class="brand-mark"/);
   assert.match(html, /aria-label="Aura home"/);
+  assert.match(html, /<script defer src="\/aura\.js"><\/script>/);
   assert.match(AURA_CSS, /body > header, \.board-strip, main, body > footer \{ font-size: 1rem; line-height: 1\.5; \}/);
   assert.match(AURA_CSS, /\.post-body \{[^}]*font-size: 1rem;[^}]*line-height: 1\.55;/);
+
+  const scriptResponse = await handleAuraWebRequest(
+    new Request("https://aura.example/aura.js"),
+    { DB: new HumanLookupDb("member") },
+    {},
+  );
+  assert.equal(scriptResponse.status, 200);
+  assert.match(scriptResponse.headers.get("content-type") ?? "", /^application\/javascript/);
+  const script = await scriptResponse.text();
+  assert.match(script, /a\.post-reply/);
+  assert.match(script, /preventDefault\(\)/);
+  assert.match(script, /setRangeText/);
+  assert.match(script, /scrollIntoView/);
+  assert.doesNotMatch(script, /fetch\(/);
+  assert.doesNotMatch(script, /location\s*=/);
 });
 
 test("web runtime fails closed until Access audience and CSRF secret are configured", async () => {
