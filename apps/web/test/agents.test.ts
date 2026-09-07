@@ -10,10 +10,20 @@ import {
   listOwnedAgents,
   revokeOwnedAgentCredential,
   rotateOwnedAgentCredential,
+  setOwnedAgentReplyNotificationSettings,
   setOwnedAgentStatus,
 } from "../src/agents/service.ts";
 
-const migration1 = readFileSync(new URL("../../../db/migrations/0001_initial.sql", import.meta.url), "utf8");
+const migrationNames = [
+  "0001_initial.sql",
+  "0002_human_membership_and_board_staff.sql",
+  "0003_unbound_member_invites.sql",
+  "0004_board_thread_lifecycle.sql",
+  "0005_post_edit_history.sql",
+  "0006_post_references.sql",
+  "0007_reply_notifications.sql",
+] as const;
+const migrations = migrationNames.map((name) => readFileSync(new URL(`../../../db/migrations/${name}`, import.meta.url), "utf8"));
 const HUMAN_ID = "hum_AAAAAAAAAAAAAAAAAAAAAA";
 const OTHER_ID = "hum_BBBBBBBBBBBBBBBBBBBBBB";
 
@@ -26,12 +36,15 @@ class StatementAdapter implements D1PreparedStatementLike {
   async first<T = Record<string, unknown>>(): Promise<T | null> { const row = this.database.prepare(this.query).get(...this.values); return row === undefined ? null : { ...row } as T; }
   async all<T = Record<string, unknown>>(): Promise<D1ResultLike<T>> { const rows = this.database.prepare(this.query).all(...this.values); return { results: rows.map((row) => ({ ...row })) as T[] }; }
   async run<T = Record<string, unknown>>(): Promise<D1ResultLike<T>> { return this.runSync() as D1ResultLike<T>; }
-  runSync(): D1ResultLike { const result = this.database.prepare(this.query).run(...this.values); return { success: true, meta: { changes: Number(result.changes) } }; }
+  runSync(): D1ResultLike<Record<string, unknown>> { const result = this.database.prepare(this.query).run(...this.values); return { results: [], meta: { changes: Number(result.changes) } }; }
 }
 
 class DatabaseAdapter implements D1DatabaseLike {
   readonly sqlite = new DatabaseSync(":memory:");
-  constructor() { this.sqlite.exec("PRAGMA foreign_keys = ON;"); this.sqlite.exec(migration1); }
+  constructor() {
+    this.sqlite.exec("PRAGMA foreign_keys = ON;");
+    for (const migration of migrations) this.sqlite.exec(migration);
+  }
   prepare(query: string): D1PreparedStatementLike { return new StatementAdapter(this.sqlite, query); }
   async batch(statements: readonly D1PreparedStatementLike[]): Promise<readonly D1ResultLike[]> {
     this.sqlite.exec("BEGIN IMMEDIATE;");
@@ -99,6 +112,8 @@ test("human creates an owned read-only agent credential and secret is verifier-o
     assert.equal(listed.value.length, 1);
     assert.equal(listed.value[0].agentId, created.value.agentId);
     assert.equal(listed.value[0].credentials.length, 1);
+    assert.equal(listed.value[0].notifyRepliesToAgent, true);
+    assert.equal(listed.value[0].notifyRepliesToOwner, false);
   }
   db.close();
 });
@@ -142,5 +157,37 @@ test("owner can disable, re-enable, and revoke an agent credential", async () =>
   const revoked = await revokeOwnedAgentCredential(db, owner, created.value.agentId, created.value.credentialId, 103);
   assert.equal(revoked.ok, true);
   assert.equal((db.sqlite.prepare("SELECT status FROM agent_credentials WHERE credential_id=?").get(created.value.credentialId) as { status: string }).status, "revoked");
+  db.close();
+});
+
+test("only the owning human can change an agent's reply notification sources", async () => {
+  const db = new DatabaseAdapter();
+  seedHuman(db, HUMAN_ID, "owner");
+  seedHuman(db, OTHER_ID, "admin");
+  const created = await createOwnedAgent(db, owner, { name: "Helper", model: null, client: null }, 100);
+  assert(created.ok);
+  if (!created.ok) return db.close();
+
+  const denied = await setOwnedAgentReplyNotificationSettings(db, otherAdmin, created.value.agentId, {
+    repliesToAgent: false,
+    repliesToOwner: true,
+  }, 101);
+  assert.equal(denied.ok, false);
+  if (!denied.ok) assert.equal(denied.error.code, "forbidden");
+
+  const changed = await setOwnedAgentReplyNotificationSettings(db, owner, created.value.agentId, {
+    repliesToAgent: false,
+    repliesToOwner: true,
+  }, 102);
+  assert.deepEqual(changed, {
+    ok: true,
+    value: { agentId: created.value.agentId, notifyRepliesToAgent: false, notifyRepliesToOwner: true },
+  });
+  const stored = db.sqlite.prepare(`SELECT notify_replies_to_agent, notify_replies_to_owner
+    FROM agents WHERE id=?`).get(created.value.agentId) as { notify_replies_to_agent: number; notify_replies_to_owner: number };
+  assert.deepEqual({ ...stored }, { notify_replies_to_agent: 0, notify_replies_to_owner: 1 });
+  const audit = db.sqlite.prepare(`SELECT action FROM audit_events
+    WHERE target_id=? ORDER BY id DESC LIMIT 1`).get(created.value.agentId) as { action: string };
+  assert.equal(audit.action, "agent_reply_notifications_changed");
   db.close();
 });
