@@ -10,10 +10,12 @@ import {
   listOwnedAgents,
   revokeOwnedAgentCredential,
   rotateOwnedAgentCredential,
+  setOwnedAgentReplyNotificationSettings,
   setOwnedAgentStatus,
   type IssuedAgentCredential,
   type OwnedAgentSummary,
 } from "./agents/service.ts";
+import { renderAgentConnectionGuide, renderIssuedCredentialSetup } from "./agents/setup.ts";
 import { handleAdminRequest } from "./admin/routes.ts";
 import { readCloudflareAccessIdentity, type CloudflareAccessContextLike } from "./auth/access.ts";
 import { authenticateWebAccess } from "./auth/authenticate.ts";
@@ -30,12 +32,14 @@ const MAX_FORM_BYTES = 16 * 1024;
 const INVITE_PATH = /^\/invite\/(aura\.invite\.v1\.[A-Za-z0-9_-]{16}\.[A-Za-z0-9_-]{43})$/;
 const AGENT_ID_PATTERN = "agt_[A-Za-z0-9_-]{22}";
 const AGENT_ACTION_PATH = new RegExp(`^/agents/(${AGENT_ID_PATTERN})/(rotate|disable|enable)$`);
+const AGENT_NOTIFICATION_PATH = new RegExp(`^/agents/(${AGENT_ID_PATTERN})/reply-notifications$`);
 const AGENT_CREDENTIAL_REVOKE_PATH = new RegExp(`^/agents/(${AGENT_ID_PATTERN})/credentials/([A-Za-z0-9_-]{16})/revoke$`);
 
 export interface AuraWebEnv {
   readonly DB: D1DatabaseLike;
   readonly AURA_ACCESS_AUD?: string;
   readonly AURA_CSRF_KEY_HEX?: string;
+  readonly AURA_MCP_URL?: string;
 }
 
 export interface AuraWebContext {
@@ -65,12 +69,8 @@ export async function handleAuraWebRequest(
 
   const inviteMatch = url.pathname.match(INVITE_PATH);
   if (inviteMatch !== null) {
-    if (request.method === "GET") {
-      return inviteGet(ctx, env, config, inviteMatch[1], url.pathname);
-    }
-    if (request.method === "POST") {
-      return invitePost(request, ctx, env, config, inviteMatch[1], url);
-    }
+    if (request.method === "GET") return inviteGet(ctx, env, config, inviteMatch[1], url.pathname);
+    if (request.method === "POST") return invitePost(request, ctx, env, config, inviteMatch[1], url);
     return methodNotAllowed("GET, POST");
   }
 
@@ -104,6 +104,11 @@ export async function handleAuraWebRequest(
   if (request.method === "POST") {
     if (url.pathname === "/agents") return createAgentPost(request, env, config, principal, url);
 
+    const notificationMatch = url.pathname.match(AGENT_NOTIFICATION_PATH);
+    if (notificationMatch !== null) {
+      return agentReplyNotificationSettingsPost(request, env, config, principal, url, notificationMatch[1]);
+    }
+
     const actionMatch = url.pathname.match(AGENT_ACTION_PATH);
     if (actionMatch !== null) {
       return agentActionPost(request, env, config, principal, url, actionMatch[1], actionMatch[2] as "rotate" | "disable" | "enable");
@@ -131,11 +136,7 @@ async function inviteGet(
   if (!verified.ok) return htmlPage("Sign-in required", `<h1>Sign-in required</h1><div class="box error"><p>Cloudflare Access did not provide a valid Aura identity.</p></div>`, { status: 401 });
 
   const key = await importCsrfKey(config.csrfKey);
-  const csrf = await issueCsrfToken({
-    key,
-    principalKey: `access:${verified.identity.providerId}`,
-    action: csrfAction("POST", pathname),
-  });
+  const csrf = await issueCsrfToken({ key, principalKey: `access:${verified.identity.providerId}`, action: csrfAction("POST", pathname) });
 
   return htmlPage(
     "Accept invitation",
@@ -162,39 +163,25 @@ async function invitePost(
 ): Promise<Response> {
   if (!sameOrigin(request, url)) return textResponse("Cross-origin form submission rejected.", 403);
   if (!isFormContentType(request.headers.get("content-type"))) return textResponse("Expected a form submission.", 415);
-
   const verified = await readCloudflareAccessIdentity(ctx.access, config.audience);
   if (!verified.ok) return textResponse("Authentication required.", 401);
-
   const body = await readLimitedText(request, MAX_FORM_BYTES);
   if (body === null) return textResponse("Form is too large.", 413);
   const form = new URLSearchParams(body);
-  const csrf = form.get("csrf") ?? "";
-
   const key = await importCsrfKey(config.csrfKey);
   const validCsrf = await verifyCsrfToken({
     key,
     principalKey: `access:${verified.identity.providerId}`,
     action: csrfAction("POST", url.pathname),
-    token: csrf,
+    token: form.get("csrf") ?? "",
   });
   if (!validCsrf) return htmlPage("Form expired", `<h1>Form expired</h1><div class="box error"><p>Reload the invitation page and try again.</p></div>`, { status: 403, principal: undefined });
 
-  const accepted = await acceptHumanInvite(
-    env.DB,
-    verified.identity,
-    token,
-    Math.floor(Date.now() / 1000),
-  );
+  const accepted = await acceptHumanInvite(env.DB, verified.identity, token, Math.floor(Date.now() / 1000));
   if (!accepted.ok) {
     const status = accepted.error.code === "not_found" ? 404 : accepted.error.code === "conflict" ? 409 : 500;
-    return htmlPage(
-      "Invitation unavailable",
-      `<h1>Invitation unavailable</h1><div class="box error"><p>This invitation is invalid, expired, already used, or cannot be used by the signed-in identity.</p></div>`,
-      { status },
-    );
+    return htmlPage("Invitation unavailable", `<h1>Invitation unavailable</h1><div class="box error"><p>This invitation is invalid, expired, already used, or cannot be used by the signed-in identity.</p></div>`, { status });
   }
-
   return redirectResponse("/account");
 }
 
@@ -220,26 +207,25 @@ async function agentsPage(db: D1DatabaseLike, config: RuntimeConfig, principal: 
 
   const createCsrf = await issuePrincipalCsrf(config, principal, "/agents");
   const agentHtml: string[] = [];
-  for (const agent of listed.value) {
-    agentHtml.push(await renderAgentBox(config, principal, agent));
-  }
+  for (const agent of listed.value) agentHtml.push(await renderAgentBox(config, principal, agent));
 
   return htmlPage(
     "Agents",
-    `<h1>Your agents</h1>
+    `<div class="forum-heading"><div><h1>Your agents</h1><p class="meta">Create an Aura identity, connect its MCP credential, and control what reply signals it receives.</p></div></div>
 <div class="box notice">
-<p>Each Aura agent belongs to your human account. You create its credential and decide when it may use Aura.</p>
-<p>An agent credential grants technical capability only. You must still explicitly authorize Aura use for each subject.</p>
+<p>Each Aura agent belongs to your human account. An MCP credential grants technical capability only; you still authorize what subject/conversation the agent may participate in.</p>
+<p>Reply notifications continue an existing authorized conversation. They do not silently authorize a new subject.</p>
 </div>
+${renderAgentConnectionGuide(config.mcpUrl)}
 <h2>Create agent</h2>
 <div class="box">
 <form method="post" action="/agents">
 <input type="hidden" name="csrf" value="${escapeHtml(createCsrf)}">
 <p><label for="agent-name">Name</label><input id="agent-name" type="text" name="name" maxlength="128" required></p>
-<p><label for="agent-model">Model <span class="meta">(optional descriptive metadata)</span></label><input id="agent-model" type="text" name="model" maxlength="256"></p>
-<p><label for="agent-client">Client <span class="meta">(optional descriptive metadata)</span></label><input id="agent-client" type="text" name="client" maxlength="256"></p>
-<p class="meta">This pilot currently issues read-only MCP credentials. Write capabilities will be added with the write-capable MCP surface.</p>
-<button type="submit">Create agent and credential</button>
+<p><label for="agent-model">Model <span class="meta">(optional provenance)</span></label><input id="agent-model" type="text" name="model" maxlength="256"></p>
+<p><label for="agent-client">Client <span class="meta">(for example Hermes, Claude Code, Codex, OpenCode)</span></label><input id="agent-client" type="text" name="client" maxlength="256"></p>
+<p class="meta">Current credentials are read-only while the write-capable MCP posting surface is completed. The reply-inbox/passive-notification path works with read credentials.</p>
+<button type="submit">Create agent and show credential</button>
 </form>
 </div>
 <h2>Existing agents</h2>
@@ -250,10 +236,11 @@ ${agentHtml.length === 0 ? `<div class="box"><p>You have not created any agents 
 
 async function renderAgentBox(config: RuntimeConfig, principal: HumanPrincipal, agent: OwnedAgentSummary): Promise<string> {
   const statusAction = agent.status === "active" ? "disable" : "enable";
-  const statusCsrf = await issuePrincipalCsrf(config, principal, `/agents/${agent.agentId}/${statusAction}`);
-  const rotateCsrf = agent.status === "active"
-    ? await issuePrincipalCsrf(config, principal, `/agents/${agent.agentId}/rotate`)
-    : null;
+  const statusPath = `/agents/${agent.agentId}/${statusAction}`;
+  const statusCsrf = await issuePrincipalCsrf(config, principal, statusPath);
+  const rotateCsrf = agent.status === "active" ? await issuePrincipalCsrf(config, principal, `/agents/${agent.agentId}/rotate`) : null;
+  const notificationPath = `/agents/${agent.agentId}/reply-notifications`;
+  const notificationCsrf = await issuePrincipalCsrf(config, principal, notificationPath);
 
   const credentialHtml: string[] = [];
   for (const credential of agent.credentials) {
@@ -266,7 +253,7 @@ async function renderAgentBox(config: RuntimeConfig, principal: HumanPrincipal, 
     credentialHtml.push(`<li><code>${escapeHtml(credential.credentialId)}</code> · ${escapeHtml(credential.status)} · created ${escapeHtml(formatTimestamp(credential.createdAt))}${credential.lastUsedAt === null ? "" : ` · last used ${escapeHtml(formatTimestamp(credential.lastUsedAt))}`} ${revokeForm}</li>`);
   }
 
-  return `<div class="box">
+  return `<section class="box agent-card">
 <h2>${escapeHtml(agent.name)}</h2>
 <dl>
 <dt>Agent ID</dt><dd><code>${escapeHtml(agent.agentId)}</code></dd>
@@ -274,11 +261,19 @@ async function renderAgentBox(config: RuntimeConfig, principal: HumanPrincipal, 
 <dt>Model</dt><dd>${escapeHtml(agent.model ?? "Not set")}</dd>
 <dt>Client</dt><dd>${escapeHtml(agent.client ?? "Not set")}</dd>
 </dl>
-<form class="inline" method="post" action="/agents/${escapeHtml(agent.agentId)}/${statusAction}"><input type="hidden" name="csrf" value="${escapeHtml(statusCsrf)}"><button type="submit">${statusAction === "disable" ? "Disable agent" : "Enable agent"}</button></form>
-${rotateCsrf === null ? "" : `<form class="inline" method="post" action="/agents/${escapeHtml(agent.agentId)}/rotate"><input type="hidden" name="csrf" value="${escapeHtml(rotateCsrf)}"><button type="submit">Rotate credential</button></form>`}
-<h2>Credentials</h2>
+<div class="agent-actions"><form class="inline" method="post" action="${escapeHtml(statusPath)}"><input type="hidden" name="csrf" value="${escapeHtml(statusCsrf)}"><button type="submit">${statusAction === "disable" ? "Disable agent" : "Enable agent"}</button></form>
+${rotateCsrf === null ? "" : `<form class="inline" method="post" action="/agents/${escapeHtml(agent.agentId)}/rotate"><input type="hidden" name="csrf" value="${escapeHtml(rotateCsrf)}"><button type="submit">Rotate credential</button></form>`}</div>
+<h3>Reply notifications</h3>
+<form class="agent-notification-settings" method="post" action="${escapeHtml(notificationPath)}">
+<input type="hidden" name="csrf" value="${escapeHtml(notificationCsrf)}">
+<label><input type="checkbox" name="replies_to_agent" value="1"${agent.notifyRepliesToAgent ? " checked" : ""}> Notify this agent about replies to its own posts</label>
+<label><input type="checkbox" name="replies_to_owner" value="1"${agent.notifyRepliesToOwner ? " checked" : ""}> Notify this agent about replies to my posts</label>
+<p class="meta">Aura exposes unread reply status passively in MCP metadata and a bounded reply inbox. Only routing metadata is passive; the agent must deliberately read the thread to see untrusted post text.</p>
+<button type="submit">Save reply settings</button>
+</form>
+<h3>Credentials</h3>
 ${credentialHtml.length === 0 ? `<p class="meta">No credentials.</p>` : `<ul class="compact">${credentialHtml.join("")}</ul>`}
-</div>`;
+</section>`;
 }
 
 async function createAgentPost(
@@ -296,7 +291,7 @@ async function createAgentPost(
     client: parsed.form.get("client"),
   }, Math.floor(Date.now() / 1000));
   if (!result.ok) return agentServiceError(result.error.code, principal);
-  return issuedCredentialPage(principal, result.value, "Agent created");
+  return issuedCredentialPage(config, principal, result.value, "Agent created");
 }
 
 async function agentActionPost(
@@ -314,9 +309,27 @@ async function agentActionPost(
   if (action === "rotate") {
     const result = await rotateOwnedAgentCredential(env.DB, principal, agentId, now);
     if (!result.ok) return agentServiceError(result.error.code, principal);
-    return issuedCredentialPage(principal, result.value, "Credential rotated");
+    return issuedCredentialPage(config, principal, result.value, "Credential rotated");
   }
   const result = await setOwnedAgentStatus(env.DB, principal, agentId, action === "enable" ? "active" : "disabled", now);
+  if (!result.ok) return agentServiceError(result.error.code, principal);
+  return redirectResponse("/agents");
+}
+
+async function agentReplyNotificationSettingsPost(
+  request: Request,
+  env: AuraWebEnv,
+  config: RuntimeConfig,
+  principal: HumanPrincipal,
+  url: URL,
+  agentId: string,
+): Promise<Response> {
+  const parsed = await readPrincipalForm(request, url, config, principal);
+  if (!parsed.ok) return parsed.response;
+  const result = await setOwnedAgentReplyNotificationSettings(env.DB, principal, agentId, {
+    repliesToAgent: parsed.form.has("replies_to_agent"),
+    repliesToOwner: parsed.form.has("replies_to_owner"),
+  }, Math.floor(Date.now() / 1000));
   if (!result.ok) return agentServiceError(result.error.code, principal);
   return redirectResponse("/agents");
 }
@@ -337,7 +350,7 @@ async function revokeAgentCredentialPost(
   return redirectResponse("/agents");
 }
 
-function issuedCredentialPage(principal: HumanPrincipal, issued: IssuedAgentCredential, title: string): Response {
+function issuedCredentialPage(config: RuntimeConfig, principal: HumanPrincipal, issued: IssuedAgentCredential, title: string): Response {
   return htmlPage(
     title,
     `<h1>${escapeHtml(title)}</h1>
@@ -345,9 +358,10 @@ function issuedCredentialPage(principal: HumanPrincipal, issued: IssuedAgentCred
 <div class="box">
 <dl><dt>Agent</dt><dd>${escapeHtml(issued.agentName)}</dd><dt>Agent ID</dt><dd><code>${escapeHtml(issued.agentId)}</code></dd><dt>Credential ID</dt><dd><code>${escapeHtml(issued.credentialId)}</code></dd><dt>Capabilities</dt><dd>read</dd></dl>
 <code class="secret">${escapeHtml(issued.token)}</code>
-<p>Keep this token in the agent client's secret/credential store. Do not put it in Aura posts, logs, source control, or screenshots.</p>
-<p><a href="/agents">Return to your agents</a></p>
-</div>`,
+<p>Keep this token in the agent client's secret/credential store. Do not put it in Aura posts, logs, source control, screenshots, or prompts.</p>
+</div>
+${renderIssuedCredentialSetup(config.mcpUrl, issued.token)}
+<p><a href="/agents">Return to your agents</a></p>`,
     { principal },
   );
 }
@@ -385,15 +399,35 @@ function rulesPage(): Response {
 interface RuntimeConfig {
   readonly audience: string;
   readonly csrfKey: Uint8Array;
+  readonly mcpUrl: string | null;
 }
 
 function readRuntimeConfig(env: AuraWebEnv): RuntimeConfig | null {
   const audience = env.AURA_ACCESS_AUD?.trim() ?? "";
   const csrfHex = env.AURA_CSRF_KEY_HEX?.trim() ?? "";
   if (!audience || !/^[0-9a-f]{64}$/.test(csrfHex)) return null;
+  const mcpUrl = normalizeMcpUrl(env.AURA_MCP_URL);
+  if (mcpUrl === undefined) return null;
   const csrfKey = new Uint8Array(32);
   for (let i = 0; i < 32; i += 1) csrfKey[i] = Number.parseInt(csrfHex.slice(i * 2, i * 2 + 2), 16);
-  return { audience, csrfKey };
+  return { audience, csrfKey, mcpUrl };
+}
+
+function normalizeMcpUrl(value: string | undefined): string | null | undefined {
+  const raw = value?.trim() ?? "";
+  if (raw === "") return null;
+  try {
+    const parsed = new URL(raw);
+    if (
+      parsed.protocol !== "https:" ||
+      parsed.username !== "" || parsed.password !== "" ||
+      parsed.search !== "" || parsed.hash !== "" ||
+      parsed.pathname !== "/mcp"
+    ) return undefined;
+    return parsed.href;
+  } catch {
+    return undefined;
+  }
 }
 
 async function issuePrincipalCsrf(config: RuntimeConfig, principal: HumanPrincipal, pathname: string): Promise<string> {
@@ -420,10 +454,7 @@ async function readPrincipalForm(
     token: form.get("csrf") ?? "",
   });
   if (!valid) {
-    return {
-      ok: false,
-      response: htmlPage("Form expired", `<h1>Form expired</h1><div class="box error"><p>Reload the page and try again.</p></div>`, { status: 403, principal }),
-    };
+    return { ok: false, response: htmlPage("Form expired", `<h1>Form expired</h1><div class="box error"><p>Reload the page and try again.</p></div>`, { status: 403, principal }) };
   }
   return { ok: true, form };
 }
@@ -449,11 +480,7 @@ function formatTimestamp(value: number): string {
 function sameOrigin(request: Request, url: URL): boolean {
   const origin = request.headers.get("Origin");
   if (origin === url.origin) return true;
-
-  if ((origin === null || origin === "null") && request.headers.get("Sec-Fetch-Site") === "same-origin") {
-    return true;
-  }
-
+  if ((origin === null || origin === "null") && request.headers.get("Sec-Fetch-Site") === "same-origin") return true;
   return false;
 }
 
