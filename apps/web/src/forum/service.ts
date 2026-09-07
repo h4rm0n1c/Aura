@@ -8,8 +8,9 @@ import {
 import type { Confidence } from "../../../../packages/core/src/domain/content.ts";
 import { domainError, type DomainError } from "../../../../packages/core/src/domain/errors.ts";
 import { createAuraId, isAuraId } from "../../../../packages/core/src/domain/ids.ts";
+import { extractPostReferenceSequences } from "../../../../packages/core/src/domain/post-references.ts";
 import { MCP_LIMITS } from "../../../../packages/core/src/mcp/schemas.ts";
-import { resultChanges, type D1DatabaseLike } from "../db/d1.ts";
+import { resultChanges, type D1DatabaseLike, type D1PreparedStatementLike } from "../db/d1.ts";
 
 const BOARD_SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const THREAD_PAGE_LIMIT = 50;
@@ -63,6 +64,12 @@ export interface ForumBoardArchivePage {
   readonly truncated: boolean;
 }
 
+export interface ForumPostReference {
+  readonly postId: string;
+  readonly sequence: number;
+  readonly referencedAt: number;
+}
+
 export interface ForumPost {
   readonly postId: string;
   readonly threadId: string;
@@ -70,7 +77,8 @@ export interface ForumPost {
   readonly author: ForumAuthor;
   readonly body: string;
   readonly confidence: Confidence | null;
-  readonly parentPostId: string | null;
+  readonly references: readonly ForumPostReference[];
+  readonly referencedBy: readonly ForumPostReference[];
   readonly createdAt: number;
 }
 
@@ -128,8 +136,20 @@ interface PostRow {
   readonly agent_client: unknown;
   readonly body: unknown;
   readonly confidence: unknown;
-  readonly parent_post_id: unknown;
   readonly created_at: unknown;
+}
+
+interface PostReferenceRow {
+  readonly source_post_id: unknown;
+  readonly source_sequence: unknown;
+  readonly target_post_id: unknown;
+  readonly target_sequence: unknown;
+  readonly created_at: unknown;
+}
+
+interface ReferenceTargetRow {
+  readonly id: unknown;
+  readonly sequence: unknown;
 }
 
 interface ThreadStateRow {
@@ -310,7 +330,6 @@ export async function getForumThread(
         a.client AS agent_client,
         p.body,
         p.confidence,
-        p.parent_post_id,
         p.created_at
       FROM posts p
       LEFT JOIN humans h ON h.id = p.author_human_id
@@ -324,12 +343,20 @@ export async function getForumThread(
     return fail("internal_error");
   }
 
-  const posts: ForumPost[] = [];
+  const parsedPosts: ForumPost[] = [];
   for (const row of postRows.slice(0, POST_PAGE_LIMIT)) {
     const parsed = parsePost(row);
     if (parsed === null) return fail("internal_error");
-    posts.push(Object.freeze(parsed));
+    parsedPosts.push(parsed);
   }
+
+  const references = await loadThreadReferences(db, threadId);
+  if (references === null) return fail("internal_error");
+  const posts = parsedPosts.map((post) => Object.freeze({
+    ...post,
+    references: Object.freeze(references.outgoing.get(post.postId) ?? []),
+    referencedBy: Object.freeze(references.incoming.get(post.postId) ?? []),
+  }));
 
   return {
     ok: true,
@@ -374,8 +401,8 @@ export async function createHumanThread(
       db.prepare(`
         INSERT INTO posts
           (id, thread_id, sequence, author_kind, author_human_id, author_agent_id, body,
-           confidence, parent_post_id, visibility, hidden_by_human_id, hidden_at, created_at)
-        VALUES (?1, ?2, 1, 'human', ?3, NULL, ?4, NULL, NULL, 'visible', NULL, NULL, ?5)
+           confidence, visibility, hidden_by_human_id, hidden_at, created_at)
+        VALUES (?1, ?2, 1, 'human', ?3, NULL, ?4, NULL, 'visible', NULL, NULL, ?5)
       `).bind(postId, threadId, principal.humanId, input.body, nowSeconds),
     ]);
     if (resultChanges(results[0]) !== 1 || resultChanges(results[1]) !== 1) return fail("conflict");
@@ -389,7 +416,7 @@ export async function createHumanThread(
 export async function createHumanReply(
   db: D1DatabaseLike,
   principal: HumanPrincipal,
-  input: { readonly threadId: unknown; readonly body: unknown; readonly parentPostId?: unknown },
+  input: { readonly threadId: unknown; readonly body: unknown },
   nowSeconds: number,
 ): Promise<ForumResult<{ readonly threadId: string; readonly postId: string }>> {
   if (
@@ -399,9 +426,6 @@ export async function createHumanReply(
   ) {
     return fail("validation_error");
   }
-  if (input.parentPostId !== undefined && !isAuraId("post", input.parentPostId)) {
-    return fail("validation_error");
-  }
 
   const state = await loadThreadState(db, input.threadId);
   if (state === null || state.boardStatus !== "active") return fail("not_found");
@@ -409,28 +433,31 @@ export async function createHumanReply(
   const authorized = authorizeThreadReply(principal, state.state);
   if (!authorized.ok) return authorized;
 
-  const parentPostId = input.parentPostId ?? null;
-  if (parentPostId !== null && !(await isVisiblePostInThread(db, input.threadId, parentPostId))) {
-    return fail("validation_error");
-  }
+  const targets = await resolveReferenceTargets(db, input.threadId, input.body);
+  if (targets === null) return fail("internal_error");
 
   const postId = createAuraId("post");
   try {
-    const results = await db.batch([
+    const statements: D1PreparedStatementLike[] = [
       db.prepare(`
         INSERT INTO posts
           (id, thread_id, sequence, author_kind, author_human_id, author_agent_id, body,
-           confidence, parent_post_id, visibility, hidden_by_human_id, hidden_at, created_at)
+           confidence, visibility, hidden_by_human_id, hidden_at, created_at)
         VALUES (
           ?1, ?2,
           (SELECT COALESCE(MAX(sequence), 0) + 1 FROM posts WHERE thread_id = ?2),
-          'human', ?3, NULL, ?4, NULL, ?5, 'visible', NULL, NULL, ?6
+          'human', ?3, NULL, ?4, NULL, 'visible', NULL, NULL, ?5
         )
-      `).bind(postId, input.threadId, principal.humanId, input.body, parentPostId, nowSeconds),
+      `).bind(postId, input.threadId, principal.humanId, input.body, nowSeconds),
       db.prepare("UPDATE threads SET updated_at = ?1 WHERE id = ?2 AND listing_state = 'live'")
         .bind(nowSeconds, input.threadId),
-    ]);
+    ];
+    const referenceInsert = buildReferenceInsert(db, input.threadId, postId, targets, nowSeconds);
+    if (referenceInsert !== null) statements.push(referenceInsert);
+
+    const results = await db.batch(statements);
     if (resultChanges(results[0]) !== 1 || resultChanges(results[1]) !== 1) return fail("conflict");
+    if (targets.length > 0 && resultChanges(results[2]) !== targets.length) return fail("conflict");
   } catch {
     return fail("conflict");
   }
@@ -556,17 +583,131 @@ async function loadThreadState(
   return { state: row.state, listingState: row.listing_state, boardStatus: row.board_status };
 }
 
-async function isVisiblePostInThread(db: D1DatabaseLike, threadId: string, postId: string): Promise<boolean> {
+async function resolveReferenceTargets(
+  db: D1DatabaseLike,
+  threadId: string,
+  body: string,
+): Promise<readonly { readonly postId: string; readonly sequence: number }[] | null> {
+  const sequences = extractPostReferenceSequences(body);
+  if (sequences.length === 0) return Object.freeze([]);
+  if (sequences.length > MCP_LIMITS.postReferences) return null;
+
+  const placeholders = sequences.map((_sequence, index) => `?${index + 2}`).join(", ");
+  let rows: readonly ReferenceTargetRow[];
   try {
-    const row = await db.prepare(`
-      SELECT id FROM posts
-      WHERE id = ?1 AND thread_id = ?2 AND visibility = 'visible'
-      LIMIT 1
-    `).bind(postId, threadId).first<{ readonly id: unknown }>();
-    return row !== null && row.id === postId;
+    const result = await db.prepare(`
+      SELECT id, sequence
+      FROM posts
+      WHERE thread_id = ?1
+        AND visibility = 'visible'
+        AND sequence IN (${placeholders})
+      ORDER BY sequence ASC
+    `).bind(threadId, ...sequences).all<ReferenceTargetRow>();
+    rows = result.results ?? [];
   } catch {
-    return false;
+    return null;
   }
+
+  const targets: { postId: string; sequence: number }[] = [];
+  for (const row of rows) {
+    if (!isAuraId("post", row.id) || !Number.isSafeInteger(row.sequence) || (row.sequence as number) < 1) {
+      return null;
+    }
+    targets.push({ postId: row.id, sequence: row.sequence as number });
+  }
+  return Object.freeze(targets);
+}
+
+function buildReferenceInsert(
+  db: D1DatabaseLike,
+  threadId: string,
+  sourcePostId: string,
+  targets: readonly { readonly postId: string }[],
+  referencedAt: number,
+): D1PreparedStatementLike | null {
+  if (targets.length === 0) return null;
+  const values: string[] = [];
+  const bindings: unknown[] = [];
+  for (let index = 0; index < targets.length; index += 1) {
+    const base = index * 4 + 1;
+    values.push(`(?${base}, ?${base + 1}, ?${base + 2}, ?${base + 3})`);
+    bindings.push(threadId, sourcePostId, targets[index].postId, referencedAt);
+  }
+  return db.prepare(`
+    INSERT INTO post_references (thread_id, source_post_id, target_post_id, created_at)
+    VALUES ${values.join(", ")}
+  `).bind(...bindings);
+}
+
+async function loadThreadReferences(
+  db: D1DatabaseLike,
+  threadId: string,
+): Promise<{
+  readonly outgoing: ReadonlyMap<string, readonly ForumPostReference[]>;
+  readonly incoming: ReadonlyMap<string, readonly ForumPostReference[]>;
+} | null> {
+  let rows: readonly PostReferenceRow[];
+  try {
+    const result = await db.prepare(`
+      SELECT
+        r.source_post_id,
+        source.sequence AS source_sequence,
+        r.target_post_id,
+        target.sequence AS target_sequence,
+        r.created_at
+      FROM post_references r
+      JOIN posts source
+        ON source.id = r.source_post_id
+       AND source.thread_id = r.thread_id
+       AND source.visibility = 'visible'
+      JOIN posts target
+        ON target.id = r.target_post_id
+       AND target.thread_id = r.thread_id
+       AND target.visibility = 'visible'
+      WHERE r.thread_id = ?1
+      ORDER BY source.sequence ASC, target.sequence ASC
+    `).bind(threadId).all<PostReferenceRow>();
+    rows = result.results ?? [];
+  } catch {
+    return null;
+  }
+
+  const outgoing = new Map<string, ForumPostReference[]>();
+  const incoming = new Map<string, ForumPostReference[]>();
+  for (const row of rows) {
+    if (
+      !isAuraId("post", row.source_post_id) ||
+      !isAuraId("post", row.target_post_id) ||
+      !Number.isSafeInteger(row.source_sequence) || (row.source_sequence as number) < 1 ||
+      !Number.isSafeInteger(row.target_sequence) || (row.target_sequence as number) < 1 ||
+      !validTimestamp(row.created_at)
+    ) {
+      return null;
+    }
+    const target = Object.freeze({
+      postId: row.target_post_id,
+      sequence: row.target_sequence as number,
+      referencedAt: row.created_at as number,
+    });
+    const source = Object.freeze({
+      postId: row.source_post_id,
+      sequence: row.source_sequence as number,
+      referencedAt: row.created_at as number,
+    });
+    appendReference(outgoing, row.source_post_id, target);
+    appendReference(incoming, row.target_post_id, source);
+  }
+  return { outgoing, incoming };
+}
+
+function appendReference(
+  map: Map<string, ForumPostReference[]>,
+  postId: string,
+  reference: ForumPostReference,
+): void {
+  const existing = map.get(postId);
+  if (existing === undefined) map.set(postId, [reference]);
+  else existing.push(reference);
 }
 
 function parseBoard(row: BoardRow): ForumBoardSummary | null {
@@ -636,7 +777,6 @@ function parsePost(row: PostRow): ForumPost | null {
     !Number.isSafeInteger(row.sequence) || (row.sequence as number) < 1 ||
     typeof row.body !== "string" || utf8Bytes(row.body) > MCP_LIMITS.postBytes ||
     !(row.confidence === null || row.confidence === "low" || row.confidence === "medium" || row.confidence === "high") ||
-    !(row.parent_post_id === null || isAuraId("post", row.parent_post_id)) ||
     !validTimestamp(row.created_at)
   ) {
     return null;
@@ -650,7 +790,8 @@ function parsePost(row: PostRow): ForumPost | null {
     author,
     body: row.body,
     confidence: row.confidence,
-    parentPostId: row.parent_post_id,
+    references: Object.freeze([]),
+    referencedBy: Object.freeze([]),
     createdAt: row.created_at,
   };
 }
@@ -718,7 +859,10 @@ function validTitle(value: unknown): value is string {
 }
 
 function validPostBody(value: unknown): value is string {
-  return typeof value === "string" && value.trim().length >= 1 && utf8Bytes(value) <= MCP_LIMITS.postBytes;
+  return typeof value === "string" &&
+    value.trim().length >= 1 &&
+    utf8Bytes(value) <= MCP_LIMITS.postBytes &&
+    extractPostReferenceSequences(value).length <= MCP_LIMITS.postReferences;
 }
 
 function isThreadState(value: unknown): value is ThreadState {
