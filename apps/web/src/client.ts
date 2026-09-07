@@ -15,6 +15,10 @@ export const AURA_CLIENT_JS = String.raw`(() => {
     return match?.[1] ?? null;
   }
 
+  function dispatchInput(textarea) {
+    textarea.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+
   function replyReference(link) {
     const sequence = postSequence(link);
     if (sequence === null) return;
@@ -31,7 +35,7 @@ export const AURA_CLIENT_JS = String.raw`(() => {
     textarea.setRangeText(insertion, start, end, "end");
     textarea.focus({ preventScroll: true });
     textarea.scrollIntoView({ block: "center", behavior: "auto" });
-    textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    dispatchInput(textarea);
   }
 
   function safeHref(value) {
@@ -230,8 +234,7 @@ export const AURA_CLIENT_JS = String.raw`(() => {
         continue;
       }
 
-      const unordered = /^\s*[-+*]\s+(.+)$/.exec(line);
-      if (unordered !== null) {
+      if (/^\s*[-+*]\s+/.test(line)) {
         const list = document.createElement("ul");
         while (index < lines.length) {
           const match = /^\s*[-+*]\s+(.+)$/.exec(lines[index]);
@@ -245,8 +248,7 @@ export const AURA_CLIENT_JS = String.raw`(() => {
         continue;
       }
 
-      const ordered = /^\s*\d+\.\s+(.+)$/.exec(line);
-      if (ordered !== null) {
+      if (/^\s*\d+\.\s+/.test(line)) {
         const list = document.createElement("ol");
         while (index < lines.length) {
           const match = /^\s*\d+\.\s+(.+)$/.exec(lines[index]);
@@ -288,14 +290,92 @@ export const AURA_CLIENT_JS = String.raw`(() => {
     return refs;
   }
 
-  function dispatchInput(textarea) {
-    textarea.dispatchEvent(new Event("input", { bubbles: true }));
+  function extractReferenceSequences(source) {
+    const references = new Set();
+    const lines = source.replaceAll("\r\n", "\n").replaceAll("\r", "\n").split("\n");
+    let inFence = false;
+
+    for (const line of lines) {
+      if (inFence) {
+        if (line.trim() === FENCE) inFence = false;
+        continue;
+      }
+      if (isFenceLine(line) !== null) {
+        inFence = true;
+        continue;
+      }
+      scanInlineReferences(line, references);
+    }
+
+    return [...references].sort((a, b) => a - b);
   }
 
-  function wrapSelection(textarea, before, after, placeholder) {
+  function scanInlineReferences(source, references) {
+    let index = 0;
+    while (index < source.length) {
+      if (source[index] === "\\" && index + 1 < source.length) {
+        index += 2;
+        continue;
+      }
+
+      if (source[index] === TICK) {
+        const end = source.indexOf(TICK, index + 1);
+        if (end !== -1) {
+          index = end + 1;
+          continue;
+        }
+      }
+
+      if (source[index] === "[") {
+        const labelEnd = source.indexOf("]", index + 1);
+        if (labelEnd !== -1 && source[labelEnd + 1] === "(") {
+          const urlEnd = source.indexOf(")", labelEnd + 2);
+          if (urlEnd !== -1) {
+            index = urlEnd + 1;
+            continue;
+          }
+        }
+      }
+
+      if (source.startsWith(">>", index)) {
+        const match = /^>>([1-9][0-9]{0,8})/.exec(source.slice(index));
+        if (match !== null) {
+          references.add(Number(match[1]));
+          index += match[0].length;
+          continue;
+        }
+      }
+
+      index += 1;
+    }
+  }
+
+  function setSelection(textarea, start, end) {
+    textarea.setSelectionRange(start, end);
+    textarea.focus();
+    dispatchInput(textarea);
+  }
+
+  function toggleWrapSelection(textarea, before, after, placeholder) {
     const start = textarea.selectionStart ?? textarea.value.length;
     const end = textarea.selectionEnd ?? start;
     const selected = textarea.value.slice(start, end);
+
+    if (selected.startsWith(before) && selected.endsWith(after) && selected.length >= before.length + after.length) {
+      const content = selected.slice(before.length, selected.length - after.length);
+      textarea.setRangeText(content, start, end, "end");
+      setSelection(textarea, start, start + content.length);
+      return;
+    }
+
+    const wrappedBefore = textarea.value.slice(Math.max(0, start - before.length), start) === before;
+    const wrappedAfter = textarea.value.slice(end, end + after.length) === after;
+    if (wrappedBefore && wrappedAfter) {
+      textarea.setRangeText(selected, start - before.length, end + after.length, "end");
+      setSelection(textarea, start - before.length, end - before.length);
+      return;
+    }
+
     const content = selected || placeholder;
     textarea.setRangeText(before + content + after, start, end, "end");
     textarea.setSelectionRange(start + before.length, start + before.length + content.length);
@@ -303,18 +383,66 @@ export const AURA_CLIENT_JS = String.raw`(() => {
     dispatchInput(textarea);
   }
 
-  function prefixSelection(textarea, prefix) {
+  function selectedLineRange(textarea) {
     const start = textarea.selectionStart ?? 0;
     const end = textarea.selectionEnd ?? start;
     const lineStart = textarea.value.lastIndexOf("\n", Math.max(0, start - 1)) + 1;
     const nextBreak = textarea.value.indexOf("\n", end);
     const lineEnd = nextBreak === -1 ? textarea.value.length : nextBreak;
-    const selected = textarea.value.slice(lineStart, lineEnd);
-    const replacement = selected.split("\n").map((line) => prefix + line).join("\n");
-    textarea.setRangeText(replacement, lineStart, lineEnd, "end");
-    textarea.setSelectionRange(lineStart, lineStart + replacement.length);
+    return { lineStart, lineEnd };
+  }
+
+  function transformSelectedLines(textarea, isActive, addPrefix, removePrefix) {
+    const range = selectedLineRange(textarea);
+    const selected = textarea.value.slice(range.lineStart, range.lineEnd);
+    const lines = selected.split("\n");
+    const meaningful = lines.filter((line) => line.trim().length > 0);
+    const remove = meaningful.length > 0 && meaningful.every(isActive);
+    const replacement = lines.map((line, index) => {
+      if (line.trim().length === 0) return line;
+      return remove ? removePrefix(line) : addPrefix(line, index);
+    }).join("\n");
+
+    textarea.setRangeText(replacement, range.lineStart, range.lineEnd, "end");
+    textarea.setSelectionRange(range.lineStart, range.lineStart + replacement.length);
     textarea.focus();
     dispatchInput(textarea);
+  }
+
+  function toggleQuote(textarea) {
+    transformSelectedLines(
+      textarea,
+      (line) => /^\s*>\s?/.test(line) && !/^\s*>>/.test(line),
+      (line) => "> " + line,
+      (line) => line.replace(/^(\s*)>\s?/, "$1"),
+    );
+  }
+
+  function toggleBulletList(textarea) {
+    transformSelectedLines(
+      textarea,
+      (line) => /^\s*[-+*]\s+/.test(line),
+      (line) => "- " + line,
+      (line) => line.replace(/^(\s*)[-+*]\s+/, "$1"),
+    );
+  }
+
+  function toggleOrderedList(textarea) {
+    transformSelectedLines(
+      textarea,
+      (line) => /^\s*\d+\.\s+/.test(line),
+      (line, index) => String(index + 1) + ". " + line,
+      (line) => line.replace(/^(\s*)\d+\.\s+/, "$1"),
+    );
+  }
+
+  function toggleHeading(textarea) {
+    transformSelectedLines(
+      textarea,
+      (line) => /^\s*#{1,6}\s+/.test(line),
+      (line) => "# " + line,
+      (line) => line.replace(/^(\s*)#{1,6}\s+/, "$1"),
+    );
   }
 
   function insertCode(textarea) {
@@ -322,32 +450,62 @@ export const AURA_CLIENT_JS = String.raw`(() => {
     const end = textarea.selectionEnd ?? start;
     const selected = textarea.value.slice(start, end);
     if (selected.includes("\n")) {
-      wrapSelection(textarea, FENCE + "\n", "\n" + FENCE, selected || "code");
+      toggleWrapSelection(textarea, FENCE + "\n", "\n" + FENCE, "code");
     } else {
-      wrapSelection(textarea, TICK, TICK, "code");
+      toggleWrapSelection(textarea, TICK, TICK, "code");
     }
   }
 
   function insertLink(textarea) {
     const start = textarea.selectionStart ?? textarea.value.length;
     const end = textarea.selectionEnd ?? start;
-    const selected = textarea.value.slice(start, end) || "link text";
-    const replacement = "[" + selected + "](https://)";
+    const selected = textarea.value.slice(start, end);
+    const selectedHref = selected ? safeHref(selected.trim()) : null;
+
+    if (selectedHref !== null) {
+      const replacement = "[link text](" + selectedHref + ")";
+      textarea.setRangeText(replacement, start, end, "end");
+      setSelection(textarea, start + 1, start + 10);
+      return;
+    }
+
+    const label = selected || "link text";
+    const replacement = "[" + label + "](https://)";
     textarea.setRangeText(replacement, start, end, "end");
-    const urlStart = start + selected.length + 3;
+    const urlStart = start + label.length + 3;
     textarea.setSelectionRange(urlStart, urlStart + 8);
     textarea.focus();
     dispatchInput(textarea);
   }
 
+  function insertHorizontalRule(textarea) {
+    const start = textarea.selectionStart ?? textarea.value.length;
+    const end = textarea.selectionEnd ?? start;
+    const before = textarea.value.slice(0, start);
+    const after = textarea.value.slice(end);
+    const prefix = before.length > 0 && !before.endsWith("\n") ? "\n" : "";
+    const suffix = after.length > 0 && !after.startsWith("\n") ? "\n" : "";
+    const insertion = prefix + "---" + suffix;
+    textarea.setRangeText(insertion, start, end, "end");
+    setSelection(textarea, start + insertion.length, start + insertion.length);
+  }
+
   function toolbarButton(label, title, handler) {
     const button = document.createElement("button");
     button.type = "button";
+    button.className = "markdown-editor-tool";
     button.textContent = label;
     button.title = title;
     button.setAttribute("aria-label", title);
     button.addEventListener("click", handler);
     return button;
+  }
+
+  function toolbarSeparator() {
+    const separator = document.createElement("span");
+    separator.className = "markdown-editor-separator";
+    separator.setAttribute("role", "separator");
+    return separator;
   }
 
   function enhanceMarkdownEditor(form) {
@@ -356,49 +514,119 @@ export const AURA_CLIENT_JS = String.raw`(() => {
     const field = textarea.closest("p");
     if (!(field instanceof HTMLElement)) return;
 
-    const toolbar = document.createElement("div");
-    toolbar.className = "markdown-editor-toolbar";
-    toolbar.setAttribute("role", "toolbar");
-    toolbar.setAttribute("aria-label", "Markdown formatting");
-
-    toolbar.appendChild(toolbarButton("B", "Bold (Ctrl+B)", () => wrapSelection(textarea, "**", "**", "bold text")));
-    toolbar.appendChild(toolbarButton("I", "Italic (Ctrl+I)", () => wrapSelection(textarea, "*", "*", "italic text")));
-    toolbar.appendChild(toolbarButton("S", "Strikethrough", () => wrapSelection(textarea, "~~", "~~", "struck text")));
-    toolbar.appendChild(toolbarButton("Code", "Inline or fenced code", () => insertCode(textarea)));
-    toolbar.appendChild(toolbarButton(">", "Quote selected line(s)", () => prefixSelection(textarea, "> ")));
-    toolbar.appendChild(toolbarButton("List", "Bulleted list", () => prefixSelection(textarea, "- ")));
-    toolbar.appendChild(toolbarButton("Link", "Link (Ctrl+K)", () => insertLink(textarea)));
-
-    const area = document.createElement("div");
-    area.className = "markdown-editor-area";
-    field.before(toolbar);
-    field.before(area);
-    area.appendChild(field);
+    const previewButton = form.querySelector('button[name="intent"][value="preview"]');
+    if (!(previewButton instanceof HTMLButtonElement)) return;
 
     let preview = form.querySelector(".markdown-preview");
     const hadServerPreview = preview instanceof HTMLElement;
     if (!(preview instanceof HTMLElement)) {
       preview = document.createElement("section");
-      preview.className = "markdown-preview markdown-editor-preview";
+      preview.className = "markdown-preview";
       preview.setAttribute("aria-label", "Markdown preview");
       const label = document.createElement("div");
       label.className = "preview-label";
-      label.textContent = "Preview · local";
+      label.textContent = "Preview";
       const body = document.createElement("div");
       body.className = "markdown-body";
       preview.append(label, body);
-    } else {
-      preview.classList.add("markdown-editor-preview");
-      const label = preview.querySelector(".preview-label");
-      if (label) label.textContent = "Preview · local";
     }
-    area.appendChild(preview);
+    preview.classList.add("markdown-editor-preview");
+
+    const shell = document.createElement("div");
+    shell.className = "markdown-editor";
+    field.before(shell);
+
+    const header = document.createElement("div");
+    header.className = "markdown-editor-header";
+    const tabs = document.createElement("div");
+    tabs.className = "markdown-editor-tabs";
+    tabs.setAttribute("role", "tablist");
+    tabs.setAttribute("aria-label", "Post editor view");
+
+    const writeButton = document.createElement("button");
+    writeButton.type = "button";
+    writeButton.className = "markdown-editor-tab";
+    writeButton.textContent = "Write";
+    writeButton.setAttribute("role", "tab");
+
+    previewButton.type = "button";
+    previewButton.className = "markdown-editor-tab";
+    previewButton.textContent = "Preview";
+    previewButton.title = "Preview locally; no request is sent";
+    previewButton.setAttribute("role", "tab");
+
+    tabs.append(writeButton, previewButton);
+    header.appendChild(tabs);
+
+    const headerHint = document.createElement("span");
+    headerHint.className = "markdown-editor-header-hint";
+    headerHint.textContent = "Markdown";
+    header.appendChild(headerHint);
+
+    const toolbar = document.createElement("div");
+    toolbar.className = "markdown-editor-toolbar";
+    toolbar.setAttribute("role", "toolbar");
+    toolbar.setAttribute("aria-label", "Markdown formatting");
+    toolbar.append(
+      toolbarButton("H", "Heading", () => toggleHeading(textarea)),
+      toolbarButton("B", "Bold (Ctrl+B)", () => toggleWrapSelection(textarea, "**", "**", "bold text")),
+      toolbarButton("I", "Italic (Ctrl+I)", () => toggleWrapSelection(textarea, "*", "*", "italic text")),
+      toolbarButton("S", "Strikethrough", () => toggleWrapSelection(textarea, "~~", "~~", "struck text")),
+      toolbarSeparator(),
+      toolbarButton("Link", "Link (Ctrl+K)", () => insertLink(textarea)),
+      toolbarButton("Code", "Inline or fenced code", () => insertCode(textarea)),
+      toolbarButton("Quote", "Quote selected line(s)", () => toggleQuote(textarea)),
+      toolbarSeparator(),
+      toolbarButton("• List", "Bulleted list", () => toggleBulletList(textarea)),
+      toolbarButton("1. List", "Numbered list", () => toggleOrderedList(textarea)),
+      toolbarButton("—", "Horizontal rule", () => insertHorizontalRule(textarea)),
+    );
+
+    const help = form.querySelector(".markdown-help");
+    if (help instanceof HTMLDetailsElement) {
+      toolbar.append(
+        toolbarSeparator(),
+        toolbarButton("?", "Formatting help", () => {
+          help.open = !help.open;
+          if (help.open) help.scrollIntoView({ block: "nearest", behavior: "auto" });
+        }),
+      );
+    }
+
+    const writePane = document.createElement("div");
+    writePane.className = "markdown-editor-write";
+    writePane.setAttribute("role", "tabpanel");
+    writePane.appendChild(field);
+
+    const label = preview.querySelector(".preview-label");
+    if (label instanceof HTMLElement) label.hidden = true;
+    preview.setAttribute("role", "tabpanel");
+
+    const footer = document.createElement("div");
+    footer.className = "markdown-editor-footer";
+    const footerHelp = document.createElement("span");
+    footerHelp.className = "markdown-editor-footer-help";
+    footerHelp.textContent = "Markdown · raw HTML stays text";
+    const status = document.createElement("span");
+    status.className = "markdown-editor-status";
+    status.id = (textarea.id || "markdown-body") + "-status";
+    status.setAttribute("role", "status");
+    status.setAttribute("aria-live", "polite");
+    footer.append(footerHelp, status);
+
+    shell.append(header, toolbar, writePane, preview, footer);
 
     const previewBody = preview.querySelector(".markdown-body");
-    const previewButton = form.querySelector('button[name="intent"][value="preview"]');
-    let previewOpen = hadServerPreview;
+    const maxBytes = Number(textarea.dataset.maxBytes || "12288");
+    const maxReferences = Number(textarea.dataset.maxReferences || "128");
+    const describedBy = textarea.getAttribute("aria-describedby");
+    textarea.setAttribute("aria-describedby", describedBy ? describedBy + " " + status.id : status.id);
+
+    let mode = hadServerPreview ? "preview" : "write";
+    let previewFrame = 0;
 
     function renderPreview() {
+      previewFrame = 0;
       if (!(previewBody instanceof HTMLElement)) return;
       renderMarkdownInto(previewBody, textarea.value, collectPostTargets());
       if (!textarea.value.trim()) {
@@ -409,40 +637,64 @@ export const AURA_CLIENT_JS = String.raw`(() => {
       }
     }
 
-    function setPreviewOpen(open) {
-      previewOpen = open;
-      preview.hidden = !open;
-      area.classList.toggle("preview-open", open);
-      if (previewButton instanceof HTMLButtonElement) previewButton.setAttribute("aria-pressed", String(open));
-      if (open) renderPreview();
+    function schedulePreview() {
+      if (mode !== "preview" || previewFrame !== 0) return;
+      previewFrame = requestAnimationFrame(renderPreview);
     }
 
-    if (previewButton instanceof HTMLButtonElement) {
-      previewButton.type = "button";
-      previewButton.classList.add("editor-preview-toggle");
-      previewButton.title = "Toggle local preview; no request is sent";
-      previewButton.setAttribute("aria-pressed", String(previewOpen));
-      previewButton.addEventListener("click", () => setPreviewOpen(!previewOpen));
-      toolbar.appendChild(previewButton);
+    function setMode(nextMode, focusEditor) {
+      mode = nextMode;
+      const previewOpen = mode === "preview";
+      writePane.hidden = previewOpen;
+      toolbar.hidden = previewOpen;
+      preview.hidden = !previewOpen;
+      writeButton.setAttribute("aria-selected", String(!previewOpen));
+      previewButton.setAttribute("aria-selected", String(previewOpen));
+      writeButton.tabIndex = previewOpen ? -1 : 0;
+      previewButton.tabIndex = previewOpen ? 0 : -1;
+      if (previewOpen) {
+        renderPreview();
+      } else if (focusEditor) {
+        textarea.focus();
+      }
     }
 
-    const status = document.createElement("span");
-    status.className = "markdown-editor-status";
-    status.id = (textarea.id || "markdown-body") + "-status";
-    status.setAttribute("role", "status");
-    status.setAttribute("aria-live", "polite");
-    toolbar.appendChild(status);
-    textarea.setAttribute("aria-describedby", status.id);
-
-    const maxBytes = Number(textarea.dataset.maxBytes || "12288");
     function updateStatus() {
       const bytes = encoder.encode(textarea.value).byteLength;
+      const references = extractReferenceSequences(textarea.value);
       const tooLarge = Number.isFinite(maxBytes) && maxBytes > 0 && bytes > maxBytes;
-      status.textContent = bytes.toLocaleString() + " / " + maxBytes.toLocaleString() + " bytes";
-      status.classList.toggle("invalid", tooLarge);
-      textarea.setCustomValidity(tooLarge ? "Post exceeds the UTF-8 byte limit." : "");
-      if (previewOpen) renderPreview();
+      const tooManyReferences = Number.isFinite(maxReferences) && maxReferences > 0 && references.length > maxReferences;
+      const parts = [];
+      parts.push(bytes.toLocaleString() + " / " + maxBytes.toLocaleString() + " bytes");
+      if (references.length > 0 || tooManyReferences) {
+        parts.push(references.length.toLocaleString() + " / " + maxReferences.toLocaleString() + " refs");
+      }
+      status.textContent = parts.join(" · ");
+      status.classList.toggle("invalid", tooLarge || tooManyReferences);
+      textarea.setCustomValidity(
+        tooLarge
+          ? "Post exceeds the UTF-8 byte limit."
+          : tooManyReferences
+            ? "Post contains too many distinct post references."
+            : "",
+      );
+      schedulePreview();
     }
+
+    writeButton.addEventListener("click", () => setMode("write", true));
+    previewButton.addEventListener("click", () => setMode("preview", false));
+
+    tabs.addEventListener("keydown", (event) => {
+      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+      event.preventDefault();
+      if (mode === "write") {
+        setMode("preview", false);
+        previewButton.focus();
+      } else {
+        setMode("write", false);
+        writeButton.focus();
+      }
+    });
 
     textarea.addEventListener("input", updateStatus);
     textarea.addEventListener("keydown", (event) => {
@@ -450,17 +702,17 @@ export const AURA_CLIENT_JS = String.raw`(() => {
       const key = event.key.toLowerCase();
       if (key === "b") {
         event.preventDefault();
-        wrapSelection(textarea, "**", "**", "bold text");
+        toggleWrapSelection(textarea, "**", "**", "bold text");
       } else if (key === "i") {
         event.preventDefault();
-        wrapSelection(textarea, "*", "*", "italic text");
+        toggleWrapSelection(textarea, "*", "*", "italic text");
       } else if (key === "k") {
         event.preventDefault();
         insertLink(textarea);
       }
     });
 
-    setPreviewOpen(previewOpen);
+    setMode(mode, false);
     updateStatus();
   }
 
