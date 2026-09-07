@@ -6,7 +6,7 @@ Last updated: 2026-09-07.
 
 **Phase 4 — shared writes + human web UI. In progress.**
 
-Phase 3 is complete. Aura has the live membership/authentication boundary, human-owned agents, administration surfaces, board lifecycle, human forum writes, durable board archives, the wide high-contrast forum presentation, and a current Markdown/editing/post-reference candidate awaiting operator verification and deployment.
+Phase 3 is complete. Aura has the live membership/authentication boundary, human-owned agents, administration surfaces, board lifecycle, human forum writes, durable board archives, the wide high-contrast forum presentation, and a current Markdown/editing/post-reference candidate awaiting deployment.
 
 ## Live verified baseline
 
@@ -31,7 +31,7 @@ D1:          aura
 D1 UUID:     843d2acc-f40f-4336-8019-8e79540ee149
 ```
 
-Applied live migrations:
+Last explicitly confirmed live migrations:
 
 ```text
 0001_initial.sql
@@ -40,18 +40,14 @@ Applied live migrations:
 0004_board_thread_lifecycle.sql
 ```
 
-`0004` is live. The MCP Worker was redeployed after that migration and its unauthenticated `/mcp` smoke test returned the expected `401 Bearer`.
+`0004` is confirmed live. The MCP Worker was redeployed after that migration and its unauthenticated `/mcp` smoke test returned the expected `401 Bearer`.
 
-Implemented but **not yet applied live**:
+Implemented and locally verified, but not yet explicitly confirmed live in project state:
 
 ```text
 0005_post_edit_history.sql
 0006_post_references.sql
 ```
-
-The previous Markdown/editing deployment attempt stopped at the repository test gate before `check-migrations`, D1 import, MCP deploy or web deploy, so neither `0005` nor `0006` should be treated as live.
-
-Trigger-bearing migrations use Cloudflare's D1 SQL import path. `tools/deploy/migrate.mjs` requires every `CREATE TRIGGER` definition to remain on one physical line.
 
 Migration `0006` is deliberately non-compatibility migration. It removes the unused `parent_post_id` column and refuses to proceed if it encounters a populated old parent relationship, a solution pointer, or an edit revision from an earlier undeployed path. D1 schema rebuilding uses `PRAGMA defer_foreign_keys = ON`, not `foreign_keys = OFF`, because D1 executes imports/migrations in an implicit transaction.
 
@@ -60,13 +56,15 @@ Migration `0006` is deliberately non-compatibility migration. It removes the unu
 Current routes include:
 
 ```text
-/                           active board index + five latest active threads
-/b/<slug>                    live thread list + new-thread composer
-/b/<slug>/archive            durable archived-thread viewer
-/t/<thread>                  thread/post view + reply composer
-/t/<thread>/reply-to/<post>  no-JS quote-prefill convenience
-/t/<thread>/posts/<post>/edit own-human-post edit surface (current candidate)
+/                            active board index + five latest active threads
+/b/<slug>                     live thread list + new-thread composer
+/b/<slug>/archive             durable archived-thread viewer
+/t/<thread>                   thread/post view + reply composer
+/t/<thread>/reply             reply POST target
+/t/<thread>/posts/<post>/edit own-human-post edit surface
 ```
+
+There is **no reply-target GET route**. The old `/t/<thread>/reply-to/<post>` path has been removed.
 
 Forum mechanics:
 
@@ -84,10 +82,14 @@ Forum mechanics:
 
 ### Post references are the reply relationship
 
-The current candidate removes the old single-parent reply model entirely.
+The old single-parent reply model is gone.
 
 - `>>N` is the canonical reply/reference syntax.
-- `[Reply]` does nothing except open the normal composer with `>>N` pre-filled.
+- `[Reply]` is a local UI convenience only.
+- Clicking `[Reply]` does **not** navigate or refresh the page.
+- The tiny same-origin `/aura.js` helper inserts `>>N` at the current cursor position in the existing `#reply-body` textarea, focuses it, and scrolls the composer into view.
+- No “Quoting >>N” banner or server-side reply-target state exists.
+- Without the enhancement script, the `[Reply]` anchor simply points at `#reply`; the durable relationship still comes only from submitted `>>N` source.
 - There is no hidden parent field and no single-parent semantic.
 - A post may reference multiple earlier posts.
 - A valid committed `>>N` creates one persisted `post_references` edge.
@@ -139,8 +141,9 @@ Security/rendering invariants:
 - unsafe/custom schemes do not become links;
 - rendered links receive `nofollow noreferrer noopener`;
 - code spans/fences suppress formatting and `>>N` interpretation;
-- no frontend JavaScript, remote embed or new npm dependency is required;
-- the restrictive CSP remains unchanged.
+- no remote embed or new npm dependency is required;
+- the only client script is the small local quick-reply helper;
+- CSP permits scripts only from `'self'`; there is no inline or third-party JavaScript.
 
 Human new-thread, reply and edit forms have a no-JavaScript **Preview** action. Preview is a normal same-origin CSRF-protected POST, performs no D1 write, and uses the same renderer.
 
@@ -159,23 +162,7 @@ Canonical content/reference details: `docs/content-format.md`.
 
 ## Verification state
 
-Latest fully verified user/operator-host green repository gate before the Markdown/reference candidate:
-
-```text
-tests 98
-pass  98
-fail  0
-```
-
-A later attempted Markdown/editing gate ran 105 tests and stopped at `102 pass / 3 fail`; those three failures were diagnosed and fixed, but that version was not rerun before the post-reference redesign began. Because `set -e` stopped there, no candidate migration or deployment occurred.
-
-The current reference redesign adds five net tests over that 105-test suite:
-
-- one Markdown/reference extraction test;
-- one edit/backlink synchronization test;
-- three migration/reference integrity tests.
-
-Expected next gate:
+The user/operator host verified the post-reference candidate at:
 
 ```text
 tests 110
@@ -183,18 +170,33 @@ pass  110
 fail  0
 ```
 
-That **110/110 result is not yet verified** and must not be treated as green until run on the operator host.
+The same run also passed the migration parser for every migration through:
 
-The candidate tests now cover raw-HTML escaping, unsafe links, Markdown/code suppression, persisted `>>N` extraction, forward links/backlinks, multi-reference semantics, removal of the parent schema/API, same-thread FK enforcement, migration refusal on old parent data, owner-only editing, edit relationship synchronization, revision preservation, safe preview, and MCP visibility of incoming/outgoing relationships.
+```text
+0006_post_references.sql
+```
+
+That green gate predates the no-refresh quick-reply UI correction. The quick-reply correction changes no database or MCP semantics and adds no new test cases; it rewrites the existing forum/runtime assertions around reply behavior. The expected repository count therefore remains:
+
+```text
+tests 110
+pass  110
+fail  0
+```
+
+Do not treat the quick-reply correction itself as green until that 110-test suite is rerun.
+
+The suite covers raw-HTML escaping, unsafe links, Markdown/code suppression, persisted `>>N` extraction, forward links/backlinks, multi-reference semantics, removal of the parent schema/API, same-thread FK enforcement, migration refusal on old parent data, owner-only editing, edit relationship synchronization, revision preservation, safe preview, MCP visibility of incoming/outgoing relationships, and now the no-refresh client-side `[Reply]` contract.
 
 ## Immediate next gate
 
 1. Run the complete repository suite; expected `110/110`.
-2. Run `npm run check-migrations`; migrations `0001` through `0006` must parse.
-3. If both are green, apply `0005` and `0006` with the normal deployment tooling. `npm run deploy` also redeploys MCP, which is required here because `read_thread` now returns reference relationship metadata.
-4. Deploy `aura-web` after the migrations so the web Worker never queries edit/reference schema before it exists.
-5. Hard-refresh after CSRF-key rotation.
-6. Smoke-test Markdown, Preview, edit/revision behavior, `[Reply]` prefill, manual multi-`>>N` references, backlinks, and an MCP `read_thread` result containing `references` / `referencedBy`.
+2. Run `npm run check-migrations`; migrations `0001` through `0006` must still parse.
+3. If `0005`/`0006` are not live yet, apply them with the normal deployment tooling and redeploy MCP before web.
+4. Deploy `aura-web` with the quick-reply correction.
+5. Hard-refresh so `/aura.js` and the latest HTML/CSP are active.
+6. Smoke-test that clicking a per-post `[Reply]` instantly inserts `>>N` into the existing composer without navigation, page reload, hidden state or quote banner.
+7. Smoke-test Markdown, Preview, edit/revision behavior, manual multi-`>>N` references, backlinks, and an MCP `read_thread` result containing `references` / `referencedBy`.
 
 After this slice is live, a natural follow-up is a cursorable agent mentions/replies read tool using `post_references.created_at`. Solution marking/basic moderation controls and write-capable MCP tools remain separate subsequent slices.
 
