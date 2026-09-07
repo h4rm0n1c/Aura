@@ -60,6 +60,7 @@ function env(role: "member" | "admin"): AuraWebEnv {
     DB: new HumanLookupDb(role),
     AURA_ACCESS_AUD: "aura-web-aud",
     AURA_CSRF_KEY_HEX: "11".repeat(32),
+    AURA_MCP_URL: "https://aura-mcp.example/mcp",
   };
 }
 
@@ -86,12 +87,14 @@ test("web shell serves rules with restrictive browser headers, local JS, favicon
   assert.match(html, /aria-label="Aura home"/);
   assert.match(html, /<link rel="icon" href="\/favicon\.svg" type="image\/svg\+xml" sizes="any">/);
   assert.match(html, /<script defer src="\/aura\.js"><\/script>/);
+  assert.doesNotMatch(html, /aura-replies\.js/);
   assert.match(AURA_CSS, /body > header, \.board-strip, main, body > footer \{ font-size: 1rem; line-height: 1\.5; \}/);
   assert.match(AURA_CSS, /\.post-body \{[^}]*font-size: 1rem;[^}]*line-height: 1\.55;/);
   assert.match(AURA_CSS, /\.markdown-editor-header \{[^}]*border-bottom: 1px solid var\(--line\);/);
   assert.match(AURA_CSS, /\.markdown-editor-tab\[aria-selected="true"\] \{[^}]*var\(--accent-line\);/);
   assert.match(AURA_CSS, /\.markdown-editor-toolbar \{[^}]*overflow-x: auto;/);
   assert.match(AURA_CSS, /\.composer \.markdown-editor-write textarea \{[^}]*min-height: 14rem;/);
+  assert.match(AURA_CSS, /\.reply-menu \{[^}]*position: absolute;/);
 
   const favicon = await handleAuraWebRequest(
     new Request("https://aura.example/favicon.svg"),
@@ -147,6 +150,20 @@ test("web shell serves rules with restrictive browser headers, local JS, favicon
   assert.doesNotMatch(script, /innerHTML/);
   assert.doesNotMatch(script, /fetch\(/);
   assert.doesNotMatch(script, /location\s*=/);
+
+  const replyScriptResponse = await handleAuraWebRequest(
+    new Request("https://aura.example/aura-replies.js"),
+    { DB: new HumanLookupDb("member") },
+    {},
+  );
+  assert.equal(replyScriptResponse.status, 200);
+  assert.match(replyScriptResponse.headers.get("content-type") ?? "", /^application\/javascript/);
+  const replyScript = await replyScriptResponse.text();
+  assert.doesNotThrow(() => new Function(replyScript));
+  assert.match(replyScript, /fetch\("\/replies\/summary"/);
+  assert.match(replyScript, /document\.createElement/);
+  assert.match(replyScript, /textContent/);
+  assert.doesNotMatch(replyScript, /innerHTML/);
 });
 
 test("web runtime fails closed until Access audience and CSRF secret are configured", async () => {
@@ -208,7 +225,7 @@ test("admin invitation and user pages route through authenticated runtime", asyn
   assert.equal(denied.status, 403);
 });
 
-test("authenticated humans get an owner-scoped agent provisioning surface", async () => {
+test("authenticated humans get an owner-scoped agent provisioning and MCP onboarding surface", async () => {
   const response = await handleAuraWebRequest(
     new Request("https://aura.example/agents"),
     env("member"),
@@ -217,10 +234,18 @@ test("authenticated humans get an owner-scoped agent provisioning surface", asyn
   assert.equal(response.status, 200);
   const html = await response.text();
   assert.match(html, /Your agents/);
-  assert.match(html, /Create agent and credential/);
+  assert.match(html, /Create agent and show credential/);
   assert.match(html, /belongs to your human account/);
-  assert.match(html, /explicitly authorize Aura use for each subject/);
-  assert.match(html, /read-only MCP credentials/);
+  assert.match(html, /New credentials can read Aura and post replies/);
+  assert.match(html, /https:\/\/aura-mcp\.example\/mcp/);
+  assert.match(html, /AURA_MCP_TOKEN/);
+  assert.match(html, /Claude Code/);
+  assert.match(html, /Codex/);
+  assert.match(html, /OpenCode/);
+  assert.match(html, /Hermes/);
+  assert.match(html, /data-reply-nav/);
+  assert.match(html, /href="\/replies"/);
+  assert.match(html, /<script defer src="\/aura-replies\.js"><\/script>/);
 });
 
 test("same-origin form POST survives no-referrer Origin null but still requires CSRF", async () => {
