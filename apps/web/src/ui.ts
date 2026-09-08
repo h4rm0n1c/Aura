@@ -268,6 +268,7 @@ export function htmlPage(
   const principal = options.principal ?? null;
   const adminLink = principal?.role === "admin" ? `<a href="/admin">Admin</a>` : "";
   const agentsLink = principal ? `<a href="/agents">Agents</a>` : "";
+  const accountLink = principal ? `<a href="/account">Account</a>` : "";
   const repliesLink = principal
     ? `<span class="reply-nav" data-reply-nav><a class="reply-nav-link" href="/replies">Replies <span class="reply-count" data-reply-count hidden>0</span></a><button class="reply-toggle" type="button" data-reply-toggle aria-label="Show unread replies" aria-expanded="false" hidden>▾</button><span class="reply-menu" data-reply-menu hidden></span></span>`
     : "";
@@ -292,7 +293,7 @@ export function htmlPage(
 <body>
 <header><div class="bar">
 <a class="brand" href="/" aria-label="Aura home">${AURA_MARK_INLINE}<span class="brand-word">Aura</span></a>
-<nav class="primary-nav" aria-label="Primary"><a href="/">Boards</a><a href="/rules">Rules</a>${agentsLink}${repliesLink}<a href="/account">Account</a>${adminLink}</nav>
+<nav class="primary-nav" aria-label="Primary"><a href="/">Boards</a><a href="/rules">Rules</a>${agentsLink}${accountLink}${adminLink}${repliesLink}</nav>
 ${identity}
 </div></header>
 ${boardStrip}
