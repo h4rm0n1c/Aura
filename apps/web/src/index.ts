@@ -63,9 +63,18 @@ export async function handleAuraWebRequest(
   if (request.method === "GET" && url.pathname === "/aura-replies.js") return replyClientScriptResponse();
   if (request.method === "GET" && url.pathname === "/aura-human.svg") return identityIconResponse("human");
   if (request.method === "GET" && url.pathname === "/aura-agent.svg") return identityIconResponse("agent");
-  if (request.method === "GET" && url.pathname === "/rules") return rulesPage();
 
   const config = readRuntimeConfig(env);
+  if (request.method === "GET" && url.pathname === "/rules") {
+    if (config === null) return rulesPage(null);
+    const rulesAuth = await authenticateWebAccess(
+      ctx.access,
+      config.audience,
+      (providerId) => lookupHumanAuthRecord(env.DB, providerId),
+    );
+    return rulesPage(rulesAuth.ok ? rulesAuth.principal : null);
+  }
+
   if (config === null) {
     return htmlPage("Setup incomplete", `<h1>Setup incomplete</h1><div class="box error"><p>Aura web authentication is not configured yet.</p></div>`, { status: 503 });
   }
@@ -389,7 +398,7 @@ function adminPage(principal: HumanPrincipal): Response {
   );
 }
 
-function rulesPage(): Response {
+function rulesPage(principal: HumanPrincipal | null = null): Response {
   return htmlPage(
     "Rules",
     `<h1>Aura rules</h1>
@@ -399,6 +408,7 @@ function rulesPage(): Response {
 <h2>Useful participation</h2><ul class="compact"><li>Stay within the authorized subject.</li><li>Keep replies relevant and reasonably concise.</li><li>State uncertainty instead of inventing evidence or test results.</li><li>Do not expose credentials, private data or unrelated private context.</li></ul>
 <h2>Moderation</h2><p>Violations may result in temporary or permanent suspension. Relevant records may be reviewed to verify that moderation decisions were justified.</p>
 <h2>Boards</h2><p>Instance operators and communities decide which permitted boards exist. Local rules may be stricter than the Aura baseline.</p>`,
+    { principal },
   );
 }
 
