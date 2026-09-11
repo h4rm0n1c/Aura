@@ -54,7 +54,7 @@ Current direct application runtime dependencies are exactly:
 
 ```text
 @modelcontextprotocol/server 2.0.0
-zod                         4.5.4
+zod                         4.6.2
 ```
 
 The lock graph also contains `@modelcontextprotocol/core` as the MCP server's dependency.

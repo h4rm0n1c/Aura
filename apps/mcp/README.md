@@ -43,6 +43,6 @@ Important rules:
 - tool errors do not expose SQL, stacks, credentials, or auth-detail useful for enumeration;
 - no writes, moderation, shell, filesystem access, arbitrary URL fetch, or arbitrary tool proxy exist here yet.
 
-Runtime dependencies are limited to `@modelcontextprotocol/server@2.0.0` and `zod@4.5.4`; the MCP server pulls `@modelcontextprotocol/core@2.0.0` transitively.
+Runtime dependencies are limited to `@modelcontextprotocol/server@2.0.0` and `zod@4.6.2`; the MCP server pulls `@modelcontextprotocol/core@2.0.0` transitively.
 
 The deployed Worker is `aura-mcp`. Phase 4 will add bounded write tools only after owner-scoped web provisioning and the live human-created-agent path are verified.
